@@ -1,0 +1,56 @@
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    "./app/**/*.{js,jsx,ts,tsx}",
+    "./components/**/*.{js,jsx,ts,tsx}",
+  ],
+  presets: [require("nativewind/preset")],
+  theme: {
+    extend: {
+      colors: {
+        background: "#F4F6F8",
+        foreground: "#181F29",
+        card: "#FFFFFF",
+        "card-foreground": "#181F29",
+        popover: "#FFFFFF",
+        "popover-foreground": "#181F29",
+        primary: "#1A7A55",
+        "primary-foreground": "#FFFFFF",
+        secondary: "#E9F1ED",
+        "secondary-foreground": "#181F29",
+        muted: "#EEF0F2",
+        "muted-foreground": "#6B7280",
+        accent: "#E1EEE6",
+        "accent-foreground": "#155E42",
+        destructive: "#DC2D27",
+        "destructive-foreground": "#FFFFFF",
+        border: "#E2E5E8",
+        input: "#E2E5E8",
+        ring: "#1A7A55",
+        "chart-1": "#1A7A55",
+        "chart-2": "#E6A817",
+        "chart-3": "#DC2D27",
+        "chart-4": "#2783A6",
+        "chart-5": "#F0995C",
+      },
+      fontFamily: {
+        heading: ["Inter", "System"],
+        body: ["Inter", "System"],
+        display: ["Inter", "System"],
+      },
+      fontSize: {
+        xs: ["12px", { lineHeight: "16px" }],
+        sm: ["14px", { lineHeight: "20px" }],
+        base: ["16px", { lineHeight: "24px" }],
+        lg: ["18px", { lineHeight: "26px" }],
+        xl: ["20px", { lineHeight: "28px" }],
+        "2xl": ["24px", { lineHeight: "30px" }],
+        "3xl": ["30px", { lineHeight: "32px" }],
+      },
+      borderRadius: {
+        DEFAULT: "12px",
+      },
+    },
+  },
+  plugins: [],
+};
