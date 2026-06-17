@@ -4,34 +4,84 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Calendar, Utensils } from "lucide-react-native";
 import MealHistoryItem from "@/components/MealHistoryItem";
 import type { Meal } from "@/components/MealCard";
+import { useAuth } from "@/lib/AuthContext";
+import { getLimitsForStage } from "@/lib/ckdLimits";
+import { NUTRIENT_COLORS, type NutrientKey } from "@/components/NutrientProgressBar";
+import { dummyMeals } from "@/lib/dummyData";
 
-const meals: Meal[] = []; // TODO: wire to FastAPI /logs
+const meals: Meal[] = dummyMeals; // TODO: wire to FastAPI /logs
+
+type DayTotals = {
+  calories: number;
+  potassium: number;
+  phosphorus: number;
+  sodium: number;
+  protein: number;
+};
+
+function sumDay(dayMeals: Meal[]): DayTotals {
+  return dayMeals.reduce(
+    (acc, m) => ({
+      calories: acc.calories + (m.total_calories || 0),
+      potassium: acc.potassium + (m.total_potassium || 0),
+      phosphorus: acc.phosphorus + (m.total_phosphorus || 0),
+      sodium: acc.sodium + (m.total_sodium || 0),
+      protein: acc.protein + (m.total_protein || 0),
+    }),
+    { calories: 0, potassium: 0, phosphorus: 0, sodium: 0, protein: 0 },
+  );
+}
+
+const nutrientInfo: { key: NutrientKey; limitKey: keyof DayTotals; label: string; unit: string }[] = [
+  { key: "potassium", limitKey: "potassium", label: "K", unit: "mg" },
+  { key: "phosphorus", limitKey: "phosphorus", label: "P", unit: "mg" },
+  { key: "sodium", limitKey: "sodium", label: "Na", unit: "mg" },
+  { key: "protein", limitKey: "protein", label: "Protein", unit: "g" },
+];
 
 export default function MealHistory() {
+  const { user } = useAuth();
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  const ckdStage = user?.ckd_stage ?? null;
+  const weightKg = user?.weight_kg ?? null;
+  const limits = getLimitsForStage(ckdStage, weightKg);
+
   const groupedMeals = useMemo(() => {
-    const groups: Record<string, Meal[]> = {};
+    const groups: { label: string; meals: Meal[]; totals: DayTotals }[] = [];
+    const buckets: Record<string, Meal[]> = {};
+    const order: string[] = [];
+
     meals.forEach((meal) => {
       const d = new Date(meal.logged_at);
-      const today = new Date();
-      const yesterday = new Date();
-      yesterday.setDate(today.getDate() - 1);
+      const dateStr = d.toDateString();
+      if (!buckets[dateStr]) {
+        buckets[dateStr] = [];
+        order.push(dateStr);
+      }
+      buckets[dateStr].push(meal);
+    });
 
-      let dateKey: string;
-      if (d.toDateString() === today.toDateString()) dateKey = "Today";
-      else if (d.toDateString() === yesterday.toDateString())
-        dateKey = "Yesterday";
+    const today = new Date().toDateString();
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toDateString();
+
+    order.forEach((dateStr) => {
+      const dayMeals = buckets[dateStr];
+      let label: string;
+      if (dateStr === today) label = "Today";
+      else if (dateStr === yesterdayStr) label = "Yesterday";
       else
-        dateKey = d.toLocaleDateString("en-GB", {
+        label = new Date(dateStr).toLocaleDateString("en-GB", {
           weekday: "long",
           day: "numeric",
           month: "long",
         });
 
-      if (!groups[dateKey]) groups[dateKey] = [];
-      groups[dateKey].push(meal);
+      groups.push({ label, meals: dayMeals, totals: sumDay(dayMeals) });
     });
+
     return groups;
   }, []);
 
@@ -81,11 +131,61 @@ export default function MealHistory() {
           </View>
         ) : (
           <View>
-            {Object.entries(groupedMeals).map(([dateLabel, dayMeals]) => (
+            {groupedMeals.map(({ label: dateLabel, meals: dayMeals, totals }) => (
               <View key={dateLabel} className="mb-6">
                 <Text className="text-xs font-semibold text-muted-foreground uppercase mb-2 px-1">
                   {dateLabel}
                 </Text>
+
+                {/* Daily nutrient summary */}
+                <View className="bg-card rounded-2xl border border-border p-3 mb-2">
+                  <View className="flex-row items-center justify-between mb-2">
+                    <Text className="text-xs font-semibold text-foreground">
+                      {Math.round(totals.calories)} kcal
+                    </Text>
+                    <Text className="text-[10px] text-muted-foreground">
+                      / {limits.calories} limit
+                    </Text>
+                  </View>
+                  <View className="flex-row -mx-0.5">
+                    {nutrientInfo.map(({ key, limitKey, label, unit }) => {
+                      const val = totals[limitKey];
+                      const lim = limits[key as keyof typeof limits] as number;
+                      const pct = lim > 0 ? Math.min((val / lim) * 100, 100) : 0;
+                      const over = lim > 0 && val > lim;
+                      const color = NUTRIENT_COLORS[key];
+                      return (
+                        <View key={key} className="flex-1 px-0.5">
+                          <View className="items-center">
+                            <Text
+                              className="text-[10px] font-bold mb-0.5"
+                              style={{ color: over ? "#DC2626" : color }}
+                            >
+                              {label}
+                            </Text>
+                            <View className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                              <View
+                                className="h-full rounded-full"
+                                style={{
+                                  width: `${pct}%`,
+                                  backgroundColor: over ? "#DC2626" : color,
+                                }}
+                              />
+                            </View>
+                            <Text
+                              className="text-[9px] mt-0.5"
+                              style={{ color: over ? "#DC2626" : "#6B7280" }}
+                            >
+                              {Math.round(val)}{unit}
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                {/* Meal list */}
                 <View className="bg-card rounded-2xl border border-border overflow-hidden">
                   {dayMeals.map((meal, idx) => (
                     <View

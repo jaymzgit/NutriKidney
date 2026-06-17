@@ -7,7 +7,8 @@ import type { NutrientAlertData } from "@/components/NutrientAlert";
 export function useNutrientAlerts() {
   const { user } = useAuth();
   const ckdStage = user?.ckd_stage ?? null;
-  const limits = getLimitsForStage(ckdStage);
+  const weightKg = user?.weight_kg ?? null;
+  const limits = getLimitsForStage(ckdStage, weightKg);
 
   const todayMeals = useMemo(() => {
     const today = new Date().toDateString();

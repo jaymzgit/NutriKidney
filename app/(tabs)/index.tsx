@@ -3,7 +3,7 @@ import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native"
 import { Link } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
-import { AlertTriangle, ChevronRight, Flame, FlaskConical, Utensils } from "lucide-react-native";
+import { AlertTriangle, ChevronRight, Droplets, Flame, FlaskConical, Utensils } from "lucide-react-native";
 import { useAuth } from "@/lib/AuthContext";
 import { getLimitsForStage } from "@/lib/ckdLimits";
 import { getRiskLevel } from "@/lib/riskEngine";
@@ -45,8 +45,9 @@ export default function Home() {
   }, [todayMeals]);
 
   const ckdStage = user?.ckd_stage ?? null;
-  const limits = getLimitsForStage(ckdStage);
-  const risk = getRiskLevel(totals, ckdStage);
+  const weightKg = user?.weight_kg ?? null;
+  const limits = getLimitsForStage(ckdStage, weightKg);
+  const risk = getRiskLevel(totals, ckdStage, weightKg);
 
   const streak = useMemo(() => {
     const days = new Set(meals.map((m) => new Date(m.logged_at).toDateString()));
@@ -103,6 +104,11 @@ export default function Home() {
     limits.calories > 0 ? (totals.calories / limits.calories) * 100 : 0,
     100
   );
+
+  const fluidTotal = 0; // TODO: wire to fluid intake tracking
+  const fluidPct = limits.fluid != null && limits.fluid > 0
+    ? Math.min((fluidTotal / limits.fluid) * 100, 100)
+    : 0;
 
   const riskColors: Record<string, { bg: string; badgeBg: string; badgeText: string }> = {
     safe: { bg: "#0F6B47", badgeBg: "bg-emerald-100", badgeText: "text-emerald-700" },
@@ -221,6 +227,28 @@ export default function Home() {
               </View>
             </View>
           </View>
+
+          {limits.fluid != null && (
+            <View className="mt-3 bg-white/15 rounded-xl px-4 py-2.5 border border-white/25">
+              <View className="flex-row items-center justify-between mb-1.5">
+                <View className="flex-row items-center">
+                  <Droplets size={14} color="rgba(255,255,255,0.85)" />
+                  <Text className="text-white/85 text-[13px] font-semibold uppercase ml-1.5">
+                    Fluid
+                  </Text>
+                </View>
+                <Text className="text-white/80 text-[13px]">
+                  {fluidTotal} / {limits.fluid} ml
+                </Text>
+              </View>
+              <View className="h-2 bg-white/15 rounded-full overflow-hidden">
+                <View
+                  className="h-full bg-white rounded-full"
+                  style={{ width: `${fluidPct}%` }}
+                />
+              </View>
+            </View>
+          )}
         </View>
 
         <View className="px-4">
@@ -296,11 +324,11 @@ export default function Home() {
               <Text className="text-sm font-bold text-foreground">
                 Nutrient Tracking
               </Text>
-              {!ckdStage ? (
+              {(!ckdStage || !weightKg) ? (
                 <Link href="/(tabs)/profile" asChild>
                   <Pressable>
                     <Text className="text-xs text-primary font-medium">
-                      Set stage →
+                      {!ckdStage ? "Set stage →" : "Add weight →"}
                     </Text>
                   </Pressable>
                 </Link>
@@ -310,6 +338,12 @@ export default function Home() {
               <View className="bg-muted/60 rounded-xl px-3 py-2 mb-3">
                 <Text className="text-xs text-muted-foreground italic text-center">
                   Set your CKD stage in Profile for personalised limits
+                </Text>
+              </View>
+            ) : !weightKg ? (
+              <View className="bg-amber-50 rounded-xl px-3 py-2 mb-3 border border-amber-200">
+                <Text className="text-xs text-amber-700 italic text-center">
+                  Add your weight for accurate calorie & protein limits
                 </Text>
               </View>
             ) : null}
