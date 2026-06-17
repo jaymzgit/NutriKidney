@@ -40,7 +40,11 @@ export default function AuthLayout({
               <View className="w-14 h-14 rounded-2xl bg-primary items-center justify-center mb-4">
                 <Icon size={28} color="#FFFFFF" />
               </View>
-              <Text className="text-3xl font-bold text-foreground tracking-tight">
+              <Text
+                className="text-3xl font-bold text-foreground tracking-tight text-center"
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
                 {title}
               </Text>
               {subtitle ? (

@@ -16,11 +16,18 @@ WebBrowser.maybeCompleteAuthSession();
 
 export type AppUser = User & {
   full_name?: string | null;
-  ckd_stage?: number | null;
+  ckd_stage?: string | null;
   weight_kg?: number | null;
   height_cm?: number | null;
   age?: number | null;
   gender?: string | null;
+  has_diabetes?: boolean;
+  has_hypertension?: boolean;
+  activity_level?: string | null;
+  dietary_preference?: string | null;
+  food_allergies?: string | null;
+  latest_egfr?: number | null;
+  diagnosis_date?: string | null;
 };
 
 type AuthCtx = {
@@ -29,7 +36,7 @@ type AuthCtx = {
   isLoadingAuth: boolean;
   isAuthenticated: boolean;
   signInWithEmail: (email: string, password: string) => Promise<void>;
-  signUpWithEmail: (email: string, password: string) => Promise<void>;
+  signUpWithEmail: (email: string, password: string, metadata?: Record<string, any>) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
   updatePassword: (newPassword: string) => Promise<void>;
@@ -45,11 +52,18 @@ function decorateUser(u: User | null | undefined): AppUser | null {
   return {
     ...u,
     full_name: meta.full_name ?? meta.name ?? null,
-    ckd_stage: meta.ckd_stage ?? null,
+    ckd_stage: meta.ckd_stage != null ? String(meta.ckd_stage) : null,
     weight_kg: meta.weight_kg ?? null,
     height_cm: meta.height_cm ?? null,
     age: meta.age ?? null,
     gender: meta.gender ?? null,
+    has_diabetes: meta.has_diabetes ?? false,
+    has_hypertension: meta.has_hypertension ?? false,
+    activity_level: meta.activity_level ?? null,
+    dietary_preference: meta.dietary_preference ?? null,
+    food_allergies: meta.food_allergies ?? null,
+    latest_egfr: meta.latest_egfr ?? null,
+    diagnosis_date: meta.diagnosis_date ?? null,
   };
 }
 
@@ -80,8 +94,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error;
   }, []);
 
-  const signUpWithEmail = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({ email, password });
+  const signUpWithEmail = useCallback(async (email: string, password: string, metadata?: Record<string, any>) => {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: metadata ? { data: metadata } : undefined,
+    });
     if (error) throw error;
   }, []);
 
