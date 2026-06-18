@@ -48,7 +48,8 @@
           "photosPermission": "NutriKidney needs photo library access to upload meal photos."
         }
       ],
-      "react-native-fast-tflite"
+      "react-native-fast-tflite",
+      "./plugins/withNoCompressTflite"
     ],
     "experiments": {
       "typedRoutes": true

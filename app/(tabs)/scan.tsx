@@ -289,7 +289,7 @@ export default function ScanMeal() {
 
         const res = await fetch(
           `${process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8000"}/scan/detect`,
-          { method: "POST", body: formData, headers: { "Content-Type": "multipart/form-data" } }
+          { method: "POST", body: formData }
         );
 
         if (!res.ok) throw new Error(`Detection failed (${res.status})`);
