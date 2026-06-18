@@ -1,0 +1,20 @@
+
+# Same as .gitignore but WITHOUT /android and /ios — EAS needs those for builds
+
+expo-env.d.ts
+
+.env
+.env.*
+
+.claude
+.expo
+backend\schema.sql
+backend\venv
+backend\venv\pyvenv.cfg
+backend\venv\Scripts
+backend\venv\Lib
+backend\venv\Include
+backend\venv\Lib\site-packages
+QNA.md
+PLAN.md
+node_modules
