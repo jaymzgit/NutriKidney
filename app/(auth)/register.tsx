@@ -41,8 +41,6 @@ const CKD_STAGES = [
   { value: "3b", label: "3b" },
   { value: "4", label: "4" },
   { value: "5", label: "5" },
-  { value: "5d_hd", label: "5D HD" },
-  { value: "5d_pd", label: "5D PD" },
 ];
 
 const CKD_STAGE_DESCRIPTIONS: Record<string, string> = {
@@ -52,8 +50,6 @@ const CKD_STAGE_DESCRIPTIONS: Record<string, string> = {
   "3b": "Moderate-severe (30\u201344)",
   "4": "Severe decrease (15\u201329)",
   "5": "Kidney failure (<15)",
-  "5d_hd": "Hemodialysis",
-  "5d_pd": "Peritoneal dialysis",
 };
 
 const ACTIVITY_LEVELS = [
@@ -70,39 +66,6 @@ const DIETARY_PREFERENCES = [
   { value: "vegan", label: "Vegan" },
   { value: "pescatarian", label: "Pescatarian" },
 ];
-
-function RadioCard({
-  label,
-  desc,
-  selected,
-  onPress,
-}: {
-  label: string;
-  desc?: string;
-  selected: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      className={`flex-row items-center justify-between p-3 rounded-lg border mb-2 ${
-        selected ? "border-primary bg-primary/5" : "border-border"
-      }`}
-    >
-      <View className="flex-1">
-        <Text className="text-sm font-semibold text-foreground">{label}</Text>
-        {desc ? (
-          <Text className="text-xs text-muted-foreground mt-0.5">{desc}</Text>
-        ) : null}
-      </View>
-      {selected ? (
-        <View className="h-5 w-5 rounded-full bg-primary items-center justify-center">
-          <View className="h-2 w-2 rounded-full bg-white" />
-        </View>
-      ) : null}
-    </Pressable>
-  );
-}
 
 function TogglePill({
   label,
@@ -428,15 +391,32 @@ export default function Register() {
               {step === 2 && (
                 <>
                   <SectionLabel icon={Heart} label="CKD Stage" />
-                  {CKD_STAGES.map(({ value, label, desc }) => (
-                    <RadioCard
-                      key={value}
-                      label={label}
-                      desc={desc}
-                      selected={ckdStage === value}
-                      onPress={() => setCkdStage(value)}
-                    />
-                  ))}
+                  <View className="flex-row flex-wrap -mx-1 mb-1">
+                    {CKD_STAGES.map(({ value, label }) => (
+                      <Pressable
+                        key={value}
+                        onPress={() => setCkdStage(value)}
+                        className={`px-3.5 py-2 rounded-lg border mx-1 mb-2 ${
+                          ckdStage === value
+                            ? "border-primary bg-primary"
+                            : "border-border bg-muted"
+                        }`}
+                      >
+                        <Text
+                          className={`text-sm font-semibold ${
+                            ckdStage === value ? "text-white" : "text-foreground"
+                          }`}
+                        >
+                          {label}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  {ckdStage && CKD_STAGE_DESCRIPTIONS[ckdStage] ? (
+                    <Text className="text-xs text-muted-foreground mb-3">
+                      {CKD_STAGE_DESCRIPTIONS[ckdStage]}
+                    </Text>
+                  ) : null}
 
                   <SectionLabel icon={ShieldAlert} label="Health Conditions" />
                   <View className="flex-row flex-wrap mb-2">
@@ -461,7 +441,7 @@ export default function Register() {
                     placeholder="e.g. 45"
                     placeholderTextColor="#9CA3AF"
                     keyboardType="numeric"
-                    className="h-10 px-3 rounded-lg bg-muted border border-border text-sm text-foreground"
+                    className="px-3 py-2.5 rounded-lg bg-muted border border-border text-sm text-foreground"
                   />
                 </>
               )}
@@ -470,18 +450,19 @@ export default function Register() {
               {step === 3 && (
                 <>
                   <SectionLabel icon={Zap} label="Activity Level" />
-                  {ACTIVITY_LEVELS.map(({ value, label, desc }) => (
-                    <RadioCard
-                      key={value}
-                      label={label}
-                      desc={desc}
-                      selected={activityLevel === value}
-                      onPress={() => setActivityLevel(value)}
-                    />
-                  ))}
+                  <View className="flex-row flex-wrap mb-4">
+                    {ACTIVITY_LEVELS.map(({ value, label }) => (
+                      <TogglePill
+                        key={value}
+                        label={label}
+                        active={activityLevel === value}
+                        onPress={() => setActivityLevel(value)}
+                      />
+                    ))}
+                  </View>
 
                   <SectionLabel icon={Leaf} label="Dietary Preference" />
-                  <View className="flex-row flex-wrap mb-2">
+                  <View className="flex-row flex-wrap mb-4">
                     {DIETARY_PREFERENCES.map(({ value, label }) => (
                       <TogglePill
                         key={value}
@@ -492,7 +473,7 @@ export default function Register() {
                     ))}
                   </View>
 
-                  <Text className="text-xs font-medium text-muted-foreground mt-2 mb-1">
+                  <Text className="text-xs font-medium text-muted-foreground mb-1">
                     Food allergies or intolerances
                   </Text>
                   <TextInput
@@ -500,7 +481,7 @@ export default function Register() {
                     onChangeText={setFoodAllergies}
                     placeholder="e.g. peanuts, shellfish, dairy"
                     placeholderTextColor="#9CA3AF"
-                    className="h-10 px-3 rounded-lg bg-muted border border-border text-sm text-foreground"
+                    className="px-3 py-2.5 rounded-lg bg-muted border border-border text-sm text-foreground"
                   />
                 </>
               )}

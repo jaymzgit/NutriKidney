@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, {
   Circle as SvgCircle,
@@ -35,8 +36,6 @@ const CKD_STAGES = [
   { value: "3b", label: "3b" },
   { value: "4", label: "4" },
   { value: "5", label: "5" },
-  { value: "5d_hd", label: "5D HD" },
-  { value: "5d_pd", label: "5D PD" },
 ];
 
 const CKD_STAGE_DESCRIPTIONS: Record<string, string> = {
@@ -46,15 +45,22 @@ const CKD_STAGE_DESCRIPTIONS: Record<string, string> = {
   "3b": "Moderate-severe (30\u201344)",
   "4": "Severe decrease (15\u201329)",
   "5": "Kidney failure (<15)",
-  "5d_hd": "Hemodialysis",
-  "5d_pd": "Peritoneal dialysis",
 };
 
+function stageFromEgfr(egfr: number): string | null {
+  if (egfr >= 90) return "1";
+  if (egfr >= 60) return "2";
+  if (egfr >= 45) return "3a";
+  if (egfr >= 30) return "3b";
+  if (egfr >= 15) return "4";
+  return "5";
+}
+
 const ACTIVITY_LEVELS = [
-  { value: "sedentary", label: "Sedentary", desc: "Little or no exercise" },
-  { value: "light", label: "Light", desc: "Light exercise 1\u20133 days/wk" },
-  { value: "moderate", label: "Moderate", desc: "Moderate exercise 3\u20135 days/wk" },
-  { value: "active", label: "Active", desc: "Hard exercise 6\u20137 days/wk" },
+  { value: "sedentary", label: "Sedentary" },
+  { value: "light", label: "Light" },
+  { value: "moderate", label: "Moderate" },
+  { value: "active", label: "Active" },
 ];
 
 const DIETARY_PREFERENCES = [
@@ -83,25 +89,6 @@ function TogglePill({ label, active, onPress }: { label: string; active: boolean
       className={`px-4 py-2.5 rounded-lg border mr-2 mb-2 ${active ? "border-primary bg-primary/5" : "border-border bg-muted"}`}
     >
       <Text className={`text-sm ${active ? "text-primary font-semibold" : "text-foreground"}`}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function RadioCard({ label, desc, selected, onPress }: { label: string; desc?: string; selected: boolean; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      className={`flex-row items-center justify-between p-3 rounded-lg border mb-2 ${selected ? "border-primary bg-primary/5" : "border-border"}`}
-    >
-      <View className="flex-1">
-        <Text className="text-sm font-semibold text-foreground">{label}</Text>
-        {desc ? <Text className="text-xs text-muted-foreground mt-0.5">{desc}</Text> : null}
-      </View>
-      {selected ? (
-        <View className="h-5 w-5 rounded-full bg-primary items-center justify-center">
-          <View className="h-2 w-2 rounded-full bg-white" />
-        </View>
-      ) : null}
     </Pressable>
   );
 }
@@ -221,26 +208,26 @@ export default function Profile() {
     if (data) setWeightHistory(data);
   }, [user]);
 
-  useEffect(() => {
-    fetchWeightHistory();
-  }, [fetchWeightHistory]);
-
-  useEffect(() => {
-    if (user) {
-      setCkdStage(user.ckd_stage ?? null);
-      setWeight(user.weight_kg ? String(user.weight_kg) : "");
-      setHeight(user.height_cm ? String(user.height_cm) : "");
-      setAge(user.age ? String(user.age) : "");
-      setGender(user.gender ?? "");
-      setHasDiabetes(user.has_diabetes ?? false);
-      setHasHypertension(user.has_hypertension ?? false);
-      setActivityLevel(user.activity_level ?? null);
-      setDietaryPreference(user.dietary_preference ?? null);
-      setFoodAllergies(user.food_allergies ?? "");
-      setLatestEgfr(user.latest_egfr ? String(user.latest_egfr) : "");
-      setDiagnosisDate(user.diagnosis_date ?? "");
-    }
-  }, [user]);
+  // Reset form to user values on focus (reverts unsaved changes on re-enter)
+  useFocusEffect(
+    useCallback(() => {
+      if (user) {
+        setCkdStage(user.ckd_stage ?? null);
+        setWeight(user.weight_kg ? String(user.weight_kg) : "");
+        setHeight(user.height_cm ? String(user.height_cm) : "");
+        setAge(user.age ? String(user.age) : "");
+        setGender(user.gender ?? "");
+        setHasDiabetes(user.has_diabetes ?? false);
+        setHasHypertension(user.has_hypertension ?? false);
+        setActivityLevel(user.activity_level ?? null);
+        setDietaryPreference(user.dietary_preference ?? null);
+        setFoodAllergies(user.food_allergies ?? "");
+        setLatestEgfr(user.latest_egfr ? String(user.latest_egfr) : "");
+        setDiagnosisDate(user.diagnosis_date ?? "");
+      }
+      fetchWeightHistory();
+    }, [user, fetchWeightHistory])
+  );
 
   const handleSave = async () => {
     setSaving(true);
@@ -352,30 +339,54 @@ export default function Profile() {
         <View className="bg-card rounded-xl border border-border p-4 mb-5">
           <SectionHeader icon={Heart} label="CKD Stage" />
           <View className="flex-row flex-wrap -mx-1 mb-1">
-            {CKD_STAGES.map(({ value, label }) => (
-              <Pressable
-                key={value}
-                onPress={() => setCkdStage(value)}
-                className={`px-3.5 py-2 rounded-lg border mx-1 mb-2 ${
-                  ckdStage === value
-                    ? "border-primary bg-primary"
-                    : "border-border bg-muted"
-                }`}
-              >
-                <Text
-                  className={`text-sm font-semibold ${
-                    ckdStage === value ? "text-white" : "text-foreground"
+            {CKD_STAGES.map(({ value, label }) => {
+              const suggested = latestEgfr ? stageFromEgfr(Number(latestEgfr)) : null;
+              const isSuggested = suggested === value && ckdStage !== value;
+              return (
+                <Pressable
+                  key={value}
+                  onPress={() => setCkdStage(value)}
+                  className={`px-3.5 py-2 rounded-lg border mx-1 mb-2 ${
+                    ckdStage === value
+                      ? "border-primary bg-primary"
+                      : isSuggested
+                      ? "border-primary border-dashed bg-primary/5"
+                      : "border-border bg-muted"
                   }`}
                 >
-                  {label}
-                </Text>
-              </Pressable>
-            ))}
+                  <Text
+                    className={`text-sm font-semibold ${
+                      ckdStage === value
+                        ? "text-white"
+                        : isSuggested
+                        ? "text-primary"
+                        : "text-foreground"
+                    }`}
+                  >
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
           {ckdStage && CKD_STAGE_DESCRIPTIONS[ckdStage] ? (
             <Text className="text-xs text-muted-foreground">
               {CKD_STAGE_DESCRIPTIONS[ckdStage]}
             </Text>
+          ) : null}
+          {latestEgfr && stageFromEgfr(Number(latestEgfr)) !== ckdStage ? (
+            <Pressable
+              onPress={() => setCkdStage(stageFromEgfr(Number(latestEgfr)))}
+              className="mt-2 bg-primary/5 border border-primary/20 rounded-lg px-3 py-2"
+            >
+              <Text className="text-xs text-primary">
+                Based on eGFR {latestEgfr}, suggested stage is{" "}
+                <Text className="font-bold">
+                  {stageFromEgfr(Number(latestEgfr))}
+                </Text>
+                . Tap to update.
+              </Text>
+            </Pressable>
           ) : null}
         </View>
 
@@ -458,18 +469,16 @@ export default function Profile() {
         {/* Activity Level */}
         <View className="bg-card rounded-xl border border-border p-4 mb-5">
           <SectionHeader icon={Zap} label="Activity Level" />
-          <Text className="text-xs text-muted-foreground mb-3">
-            Affects your daily calorie target (25\u201335 kcal/kg)
-          </Text>
-          {ACTIVITY_LEVELS.map(({ value, label, desc }) => (
-            <RadioCard
-              key={value}
-              label={label}
-              desc={desc}
-              selected={activityLevel === value}
-              onPress={() => setActivityLevel(value)}
-            />
-          ))}
+          <View className="flex-row flex-wrap">
+            {ACTIVITY_LEVELS.map(({ value, label }) => (
+              <TogglePill
+                key={value}
+                label={label}
+                active={activityLevel === value}
+                onPress={() => setActivityLevel(value)}
+              />
+            ))}
+          </View>
         </View>
 
         {/* Dietary Preference */}

@@ -145,10 +145,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const updateProfile = useCallback(async (patch: Partial<AppUser>) => {
+    // Save to auth user_metadata
     const { error } = await supabase.auth.updateUser({ data: patch });
     if (error) throw error;
-    const { data } = await supabase.auth.getSession();
-    setSession(data.session);
+    const { data: sessionData } = await supabase.auth.getSession();
+    setSession(sessionData.session);
+
+    // Also sync to profiles table (non-blocking — table may not exist yet)
+    const userId = sessionData.session?.user?.id;
+    if (userId) {
+      const row: Record<string, any> = {};
+      const profileFields = [
+        "full_name", "age", "gender", "weight_kg", "height_cm",
+        "ckd_stage", "has_diabetes", "has_hypertension",
+        "activity_level", "dietary_preference", "food_allergies",
+        "latest_egfr", "diagnosis_date",
+      ];
+      for (const key of profileFields) {
+        if (key in patch) row[key] = (patch as any)[key];
+      }
+      if (Object.keys(row).length > 0) {
+        supabase.from("profiles").update(row).eq("id", userId).then(() => {});
+      }
+    }
   }, []);
 
   const logout = useCallback(async () => {
