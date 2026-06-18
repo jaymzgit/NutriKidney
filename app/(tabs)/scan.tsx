@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -21,7 +21,6 @@ import {
   Check,
   ImageIcon,
   Minus,
-  Pencil,
   Plus,
   RefreshCw,
   Search,
@@ -31,10 +30,12 @@ import {
 import type { LucideIcon } from "lucide-react-native";
 import Button from "@/components/Button";
 import { api } from "@/lib/api";
+import { detectFood, isModelLoaded, loadModel } from "@/lib/yolo";
+import { matchFood, scaleFood, searchFoods } from "@/lib/foodDb";
 
 /* ── Types ──────────────────────────────────────────── */
 
-type ModeKey = "scan" | "text" | "manual";
+type ModeKey = "scan" | "manual";
 
 type Mode = {
   key: ModeKey;
@@ -58,11 +59,23 @@ type FoodResult = {
   confidence: number;
 };
 
-type CartItem = FoodResult & { id: string };
+type BBox = { x: number; y: number; w: number; h: number };
+type CartItem = FoodResult & { id: string; bbox?: BBox };
 
 /* ── Constants ──────────────────────────────────────── */
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
+
+const BBOX_COLORS = [
+  "#1A7A55",
+  "#E6A817",
+  "#2783A6",
+  "#DC2626",
+  "#7C3AED",
+  "#DB2777",
+  "#059669",
+  "#D97706",
+];
 
 const modes: Mode[] = [
   {
@@ -70,22 +83,12 @@ const modes: Mode[] = [
     icon: Camera,
     label: "Scan",
     title: "Scan Food Photo",
-    description:
-      "Take a photo of your meal and our AI will identify the foods",
+    description: "Take a photo and AI will identify each food item",
     color: "#1A7A55",
   },
   {
-    key: "text",
-    icon: Pencil,
-    label: "Describe",
-    title: "Describe Your Meal",
-    description:
-      "Type what you ate in plain language and we'll find the foods for you",
-    color: "#E6A817",
-  },
-  {
     key: "manual",
-    icon: Pencil,
+    icon: Search,
     label: "Manual",
     title: "Manual Log",
     description:
@@ -104,30 +107,44 @@ function uid() {
 export default function ScanMeal() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [active, setActive] = useState<ModeKey>("manual");
+  const [active, setActive] = useState<ModeKey>("scan");
   const current = modes.find((m) => m.key === active)!;
 
-  // Camera state
+  // Camera
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [showCamera, setShowCamera] = useState(false);
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
   const [detecting, setDetecting] = useState(false);
+  const [modelReady, setModelReady] = useState(false);
 
-  // Manual search state
+  // Review
+  const [showReview, setShowReview] = useState(false);
+  const [scanImageUri, setScanImageUri] = useState<string | null>(null);
+  const [scanImageSize, setScanImageSize] = useState<{
+    w: number;
+    h: number;
+  } | null>(null);
+
+  // Manual search (local)
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<FoodResult[]>([]);
-  const [searching, setSearching] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Text parse state
-  const [descText, setDescText] = useState("");
-  const [parsing, setParsing] = useState(false);
-  const [parsedItems, setParsedItems] = useState<FoodResult[]>([]);
-
-  // Shared cart + submission
+  // Cart + submit
   const [cart, setCart] = useState<CartItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // Load YOLO model on mount
+  useEffect(() => {
+    loadModel()
+      .then(() => setModelReady(true))
+      .catch(() => setModelReady(false));
+  }, []);
+
+  // Auto-close review when cart empties
+  useEffect(() => {
+    if (showReview && cart.length === 0) setShowReview(false);
+  }, [showReview, cart.length]);
 
   /* ── Cart helpers ──────────────────────────────────── */
 
@@ -167,7 +184,10 @@ export default function ScanMeal() {
     if (!permission?.granted) {
       const result = await requestPermission();
       if (!result.granted) {
-        Alert.alert("Permission needed", "Camera access is required to scan meals.");
+        Alert.alert(
+          "Permission needed",
+          "Camera access is required to scan meals."
+        );
         return;
       }
     }
@@ -181,9 +201,7 @@ export default function ScanMeal() {
       quality: 0.8,
       base64: false,
     });
-    if (photo?.uri) {
-      setCapturedUri(photo.uri);
-    }
+    if (photo?.uri) setCapturedUri(photo.uri);
   }, []);
 
   const pickFromGallery = useCallback(async () => {
@@ -197,101 +215,143 @@ export default function ScanMeal() {
     }
   }, []);
 
+  /* ── Detection (on-device YOLO → API fallback) ───── */
+
   const usePhoto = useCallback(async () => {
     if (!capturedUri) return;
     setDetecting(true);
     try {
-      // Send to backend /scan/detect (Step 5 wires this endpoint)
-      const formData = new FormData();
-      formData.append("file", {
-        uri: capturedUri,
-        type: "image/jpeg",
-        name: "meal.jpg",
-      } as any);
+      let newItems: CartItem[];
+      let imgW = 0;
+      let imgH = 0;
 
-      const res = await fetch(
-        `${process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8000"}/scan/detect`,
-        {
-          method: "POST",
-          body: formData,
-          headers: { "Content-Type": "multipart/form-data" },
-        }
-      );
+      if (isModelLoaded()) {
+        // ─── On-device YOLO ──────────────────────
+        const { detections, imageWidth, imageHeight } =
+          await detectFood(capturedUri);
+        imgW = imageWidth;
+        imgH = imageHeight;
 
-      if (!res.ok) throw new Error(`Detection failed (${res.status})`);
+        newItems = detections.map((det) => {
+          const match = matchFood(det.className);
 
-      const data = await res.json();
-      const items: FoodResult[] = data.items || [];
+          // Portion estimation from bbox area
+          const areaFraction =
+            (det.width * det.height) / (imageWidth * imageHeight);
+          const portionScale = Math.max(
+            0.5,
+            Math.min(2.0, areaFraction / 0.12)
+          );
 
-      for (const item of items) {
-        addToCart(item);
+          if (match) {
+            const portion = Math.round(match.food.portion_g * portionScale);
+            const scaled = scaleFood(match.food, portion);
+            return {
+              id: uid(),
+              name: scaled.name,
+              portion_g: scaled.portion_g,
+              calories: scaled.calories,
+              potassium_mg: scaled.potassium_mg,
+              phosphorus_mg: scaled.phosphorus_mg,
+              sodium_mg: scaled.sodium_mg,
+              protein_g: scaled.protein_g,
+              carbs_g: scaled.carbs_g,
+              fat_g: scaled.fat_g,
+              confidence:
+                Math.round(det.confidence * match.confidence * 100) / 100,
+              bbox: { x: det.x, y: det.y, w: det.width, h: det.height },
+            };
+          }
+
+          return {
+            id: uid(),
+            name: det.className.replace(/-/g, " "),
+            portion_g: Math.round(150 * portionScale),
+            calories: 0,
+            potassium_mg: 0,
+            phosphorus_mg: 0,
+            sodium_mg: 0,
+            protein_g: 0,
+            carbs_g: 0,
+            fat_g: 0,
+            confidence: Math.round(det.confidence * 0.3 * 100) / 100,
+            bbox: { x: det.x, y: det.y, w: det.width, h: det.height },
+          };
+        });
+      } else {
+        // ─── API fallback ────────────────────────
+        const formData = new FormData();
+        formData.append("file", {
+          uri: capturedUri,
+          type: "image/jpeg",
+          name: "meal.jpg",
+        } as any);
+
+        const res = await fetch(
+          `${process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8000"}/scan/detect`,
+          { method: "POST", body: formData, headers: { "Content-Type": "multipart/form-data" } }
+        );
+
+        if (!res.ok) throw new Error(`Detection failed (${res.status})`);
+        const data = await res.json();
+        newItems = (data.items || []).map((item: FoodResult) => ({
+          ...item,
+          id: uid(),
+        }));
       }
 
+      setCart((prev) => [...prev, ...newItems]);
+      setScanImageUri(capturedUri);
+      if (imgW > 0) setScanImageSize({ w: imgW, h: imgH });
       setShowCamera(false);
       setCapturedUri(null);
 
-      if (items.length === 0) {
-        Alert.alert("No foods detected", "Try a clearer photo or use manual entry.");
+      if (newItems.length === 0) {
+        Alert.alert(
+          "No foods detected",
+          "Try a clearer photo or use manual entry."
+        );
+      } else {
+        setShowReview(true);
       }
-    } catch {
-      Alert.alert("Detection unavailable", "Food scan backend not connected yet. Use manual or describe mode.");
+    } catch (e: any) {
+      Alert.alert(
+        "Detection failed",
+        modelReady
+          ? e?.message || "Unknown error"
+          : "YOLO model not loaded. Use the API backend or build a custom dev client."
+      );
       setShowCamera(false);
       setCapturedUri(null);
     } finally {
       setDetecting(false);
     }
-  }, [capturedUri, addToCart]);
+  }, [capturedUri, modelReady]);
 
-  /* ── Manual search ────────────────────────────────── */
+  /* ── Manual search (local food DB) ────────────────── */
 
   const searchFood = useCallback((text: string) => {
     setQuery(text);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
     if (text.trim().length < 2) {
       setResults([]);
       return;
     }
-    debounceRef.current = setTimeout(async () => {
-      setSearching(true);
-      try {
-        const res = await api.post<{ found: boolean; items: FoodResult[] }>(
-          "/food/lookup",
-          { query: text.trim() }
-        );
-        setResults(res.found ? res.items : []);
-      } catch {
-        setResults([]);
-      } finally {
-        setSearching(false);
-      }
-    }, 400);
+    const matches = searchFoods(text.trim());
+    setResults(
+      matches.map((m) => ({
+        name: m.food.name,
+        portion_g: m.food.portion_g,
+        calories: m.food.calories,
+        potassium_mg: m.food.potassium_mg,
+        phosphorus_mg: m.food.phosphorus_mg,
+        sodium_mg: m.food.sodium_mg,
+        protein_g: m.food.protein_g,
+        carbs_g: m.food.carbs_g,
+        fat_g: m.food.fat_g,
+        confidence: m.confidence,
+      }))
+    );
   }, []);
-
-  /* ── Text parse ───────────────────────────────────── */
-
-  const parseDescription = useCallback(async () => {
-    if (!descText.trim()) return;
-    setParsing(true);
-    try {
-      const res = await api.post<{ items: FoodResult[]; raw_text: string }>(
-        "/food/parse",
-        { text: descText.trim() }
-      );
-      setParsedItems(res.items);
-    } catch {
-      Alert.alert("Error", "Failed to parse food description");
-    } finally {
-      setParsing(false);
-    }
-  }, [descText]);
-
-  const addAllParsed = useCallback(() => {
-    for (const item of parsedItems) {
-      addToCart(item);
-    }
-    setParsedItems([]);
-    setDescText("");
-  }, [parsedItems, addToCart]);
 
   /* ── Submit ───────────────────────────────────────── */
 
@@ -315,10 +375,11 @@ export default function ScanMeal() {
         })),
       });
       setCart([]);
+      setShowReview(false);
+      setScanImageUri(null);
+      setScanImageSize(null);
       setQuery("");
       setResults([]);
-      setDescText("");
-      setParsedItems([]);
       Alert.alert("Logged", "Meal saved successfully");
       router.navigate("/(tabs)");
     } catch (e: any) {
@@ -336,14 +397,12 @@ export default function ScanMeal() {
         <StatusBar barStyle="light-content" />
 
         {capturedUri ? (
-          // Freeze frame
           <Image
             source={{ uri: capturedUri }}
             style={styles.cameraPreview}
             resizeMode="cover"
           />
         ) : (
-          // Live preview
           <CameraView
             ref={cameraRef}
             style={styles.cameraPreview}
@@ -352,9 +411,7 @@ export default function ScanMeal() {
         )}
 
         {/* Top bar */}
-        <View
-          style={[styles.topBar, { paddingTop: insets.top + 8 }]}
-        >
+        <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
           <Pressable
             onPress={() => {
               setShowCamera(false);
@@ -369,11 +426,8 @@ export default function ScanMeal() {
         </View>
 
         {/* Bottom controls */}
-        <View
-          style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}
-        >
+        <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
           {capturedUri ? (
-            // Freeze-frame controls
             <View style={styles.freezeControls}>
               <Pressable
                 onPress={() => setCapturedUri(null)}
@@ -382,7 +436,6 @@ export default function ScanMeal() {
                 <RefreshCw size={20} color="#FFFFFF" />
                 <Text style={styles.freezeBtnText}>Retake</Text>
               </Pressable>
-
               {detecting ? (
                 <View style={[styles.freezeBtn, styles.useBtn]}>
                   <ActivityIndicator size="small" color="#FFFFFF" />
@@ -399,7 +452,6 @@ export default function ScanMeal() {
               )}
             </View>
           ) : (
-            // Capture controls
             <View style={styles.captureRow}>
               <Pressable onPress={pickFromGallery} style={styles.iconBtn}>
                 <ImageIcon size={24} color="#FFFFFF" />
@@ -412,6 +464,199 @@ export default function ScanMeal() {
           )}
         </View>
       </View>
+    );
+  }
+
+  /* ── Review screen with highlighted image ────────── */
+
+  if (showReview && cart.length > 0) {
+    const displayW = SCREEN_W - 32;
+    const displayH =
+      scanImageSize && scanImageSize.w > 0
+        ? displayW * (scanImageSize.h / scanImageSize.w)
+        : displayW * 0.75;
+
+    const totalCal = cart.reduce((a, c) => a + c.calories, 0);
+    const totalK = cart.reduce((a, c) => a + c.potassium_mg, 0);
+    const totalP = cart.reduce((a, c) => a + c.phosphorus_mg, 0);
+    const totalNa = cart.reduce((a, c) => a + c.sodium_mg, 0);
+    const totalPro = cart.reduce((a, c) => a + c.protein_g, 0);
+
+    return (
+      <SafeAreaView className="flex-1 bg-background" edges={["top"]}>
+        <ScrollView
+          className="px-4 pt-4"
+          contentContainerStyle={{ paddingBottom: 120 }}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Header */}
+          <View className="flex-row items-center mb-4">
+            <Pressable
+              onPress={() => setShowReview(false)}
+              className="mr-3 p-1"
+            >
+              <X size={20} color="#6B7280" />
+            </Pressable>
+            <Text className="text-lg font-bold text-foreground">
+              Review Your Meal
+            </Text>
+          </View>
+
+          {/* Image with bounding box overlays */}
+          {scanImageUri && scanImageSize && (
+            <View
+              className="rounded-2xl overflow-hidden mb-4 border border-border"
+              style={{ width: displayW, height: displayH }}
+            >
+              <Image
+                source={{ uri: scanImageUri }}
+                style={{ width: displayW, height: displayH }}
+                resizeMode="cover"
+              />
+              {cart.map((item, idx) => {
+                if (!item.bbox || !scanImageSize) return null;
+                const sx = displayW / scanImageSize.w;
+                const sy = displayH / scanImageSize.h;
+                const color = BBOX_COLORS[idx % BBOX_COLORS.length];
+                return (
+                  <View
+                    key={`bbox-${item.id}`}
+                    style={[
+                      styles.bbox,
+                      {
+                        left: item.bbox.x * sx,
+                        top: item.bbox.y * sy,
+                        width: item.bbox.w * sx,
+                        height: item.bbox.h * sy,
+                        borderColor: color,
+                      },
+                    ]}
+                  >
+                    <View style={[styles.bboxLabel, { backgroundColor: color }]}>
+                      <Text style={styles.bboxLabelText}>
+                        {item.name} {Math.round(item.confidence * 100)}%
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
+          {/* Detected items */}
+          {cart.map((item, idx) => (
+            <View
+              key={item.id}
+              className="bg-card rounded-2xl border border-border p-4 mb-3"
+            >
+              {/* Name + color dot + confidence + remove */}
+              <View className="flex-row items-center justify-between mb-3">
+                <View className="flex-row items-center flex-1">
+                  <View
+                    style={{
+                      width: 12,
+                      height: 12,
+                      borderRadius: 3,
+                      backgroundColor: item.bbox
+                        ? BBOX_COLORS[idx % BBOX_COLORS.length]
+                        : "#9CA3AF",
+                      marginRight: 8,
+                    }}
+                  />
+                  <Text className="text-sm font-bold text-foreground flex-1">
+                    {item.name}
+                  </Text>
+                </View>
+                {item.confidence > 0 && (
+                  <View className="bg-muted px-2 py-0.5 rounded-full mr-2">
+                    <Text className="text-[10px] text-muted-foreground">
+                      {Math.round(item.confidence * 100)}%
+                    </Text>
+                  </View>
+                )}
+                <Pressable onPress={() => removeFromCart(item.id)}>
+                  <Trash2 size={16} color="#DC2626" />
+                </Pressable>
+              </View>
+
+              {/* Portion adjustment */}
+              <View className="flex-row items-center justify-center bg-muted/50 rounded-xl py-2 mb-3">
+                <Pressable
+                  onPress={() => adjustPortion(item.id, -25)}
+                  className="h-9 w-9 bg-card rounded-lg items-center justify-center border border-border"
+                >
+                  <Minus size={14} color="#6B7280" />
+                </Pressable>
+                <Text className="text-base font-bold text-foreground mx-4 min-w-[60px] text-center">
+                  {Math.round(item.portion_g)}g
+                </Text>
+                <Pressable
+                  onPress={() => adjustPortion(item.id, 25)}
+                  className="h-9 w-9 bg-card rounded-lg items-center justify-center border border-border"
+                >
+                  <Plus size={14} color="#6B7280" />
+                </Pressable>
+              </View>
+
+              {/* Nutrient grid */}
+              <View className="flex-row flex-wrap">
+                {[
+                  { label: "Calories", val: `${Math.round(item.calories)}`, u: "kcal" },
+                  { label: "Potassium", val: `${Math.round(item.potassium_mg)}`, u: "mg" },
+                  { label: "Phosphorus", val: `${Math.round(item.phosphorus_mg)}`, u: "mg" },
+                  { label: "Sodium", val: `${Math.round(item.sodium_mg)}`, u: "mg" },
+                  { label: "Protein", val: item.protein_g.toFixed(1), u: "g" },
+                  { label: "Carbs", val: item.carbs_g.toFixed(1), u: "g" },
+                  { label: "Fat", val: item.fat_g.toFixed(1), u: "g" },
+                ].map((n) => (
+                  <View key={n.label} className="w-1/3 mb-2">
+                    <Text className="text-[10px] text-muted-foreground">
+                      {n.label}
+                    </Text>
+                    <Text className="text-xs font-semibold text-foreground">
+                      {n.val} {n.u}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          ))}
+
+          {/* Meal totals */}
+          <View className="bg-muted/50 rounded-xl border border-border p-3 mb-4">
+            <Text className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">
+              Meal Totals
+            </Text>
+            <View className="flex-row flex-wrap gap-x-4 gap-y-1">
+              <Text className="text-xs font-semibold text-foreground">
+                {Math.round(totalCal)} kcal
+              </Text>
+              <Text className="text-xs text-foreground">
+                K: {Math.round(totalK)}mg
+              </Text>
+              <Text className="text-xs text-foreground">
+                P: {Math.round(totalP)}mg
+              </Text>
+              <Text className="text-xs text-foreground">
+                Na: {Math.round(totalNa)}mg
+              </Text>
+              <Text className="text-xs text-foreground">
+                Pro: {totalPro.toFixed(1)}g
+              </Text>
+            </View>
+          </View>
+
+          {/* Log button */}
+          <Button onPress={submitMeal} loading={submitting}>
+            <View className="flex-row items-center">
+              <Check size={18} color="#FFFFFF" />
+              <Text className="text-primary-foreground font-semibold ml-2">
+                Log Meal ({cart.length} item{cart.length > 1 ? "s" : ""})
+              </Text>
+            </View>
+          </Button>
+        </ScrollView>
+      </SafeAreaView>
     );
   }
 
@@ -430,7 +675,7 @@ export default function ScanMeal() {
           Log a Meal
         </Text>
 
-        {/* Mode selector pills */}
+        {/* Mode selector */}
         <View className="flex-row bg-muted rounded-xl p-1 mb-6">
           {modes.map(({ key, icon: Icon, label, color }) => {
             const selected = key === active;
@@ -466,7 +711,7 @@ export default function ScanMeal() {
           })}
         </View>
 
-        {/* Active mode header */}
+        {/* Mode header card */}
         <View className="bg-card rounded-2xl border border-border p-4 mb-4">
           <View className="flex-row items-center mb-2">
             <View
@@ -489,6 +734,16 @@ export default function ScanMeal() {
         {/* ── Scan mode ──────────────────────────────── */}
         {active === "scan" && (
           <View className="bg-card rounded-2xl border border-border p-4">
+            {!modelReady && (
+              <View className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-3">
+                <Text className="text-xs text-amber-800">
+                  On-device model not loaded. Will fall back to API detection.
+                  For offline use, place your TFLite model at
+                  assets/models/food_detect.tflite and build a custom dev
+                  client.
+                </Text>
+              </View>
+            )}
             <Button onPress={openCamera} className="mb-3">
               <View className="flex-row items-center">
                 <Camera size={20} color="#FFFFFF" />
@@ -497,7 +752,7 @@ export default function ScanMeal() {
                 </Text>
               </View>
             </Button>
-            <Button variant="outline" onPress={pickFromGallery} className="mb-3">
+            <Button variant="outline" onPress={pickFromGallery}>
               <View className="flex-row items-center">
                 <ImageIcon size={20} color="#181F29" />
                 <Text className="text-foreground font-semibold ml-2">
@@ -505,76 +760,6 @@ export default function ScanMeal() {
                 </Text>
               </View>
             </Button>
-          </View>
-        )}
-
-        {/* ── Text describe mode ──────────────────────── */}
-        {active === "text" && (
-          <View className="bg-card rounded-2xl border border-border p-4">
-            <Text className="text-xs text-muted-foreground mb-2">
-              Describe what you ate (e.g. "1 plate of rice with chicken and
-              kangkung")
-            </Text>
-            <TextInput
-              value={descText}
-              onChangeText={setDescText}
-              placeholder="I had 1 plate of nasi lemak with sambal..."
-              placeholderTextColor="#9CA3AF"
-              multiline
-              className="h-24 px-4 py-3 rounded-xl bg-muted border border-border text-sm text-foreground mb-3"
-              style={{ textAlignVertical: "top" }}
-            />
-            <Button
-              onPress={parseDescription}
-              loading={parsing}
-              disabled={!descText.trim()}
-              className="mb-3"
-            >
-              <View className="flex-row items-center">
-                <Search size={18} color="#FFFFFF" />
-                <Text className="text-primary-foreground font-semibold ml-2">
-                  Find Foods
-                </Text>
-              </View>
-            </Button>
-
-            {parsedItems.length > 0 && (
-              <View className="mt-2">
-                <Text className="text-xs font-semibold text-muted-foreground uppercase mb-2">
-                  Found {parsedItems.length} item
-                  {parsedItems.length > 1 ? "s" : ""}
-                </Text>
-                {parsedItems.map((item, i) => (
-                  <View
-                    key={i}
-                    className="flex-row items-center justify-between bg-muted/50 rounded-lg px-3 py-2.5 mb-1.5"
-                  >
-                    <View className="flex-1">
-                      <Text className="text-sm font-medium text-foreground">
-                        {item.name}
-                      </Text>
-                      <Text className="text-xs text-muted-foreground">
-                        {Math.round(item.portion_g)}g ·{" "}
-                        {Math.round(item.calories)} kcal
-                      </Text>
-                    </View>
-                    {item.confidence < 0.4 && (
-                      <Text className="text-[10px] text-amber-600 mr-2">
-                        Low match
-                      </Text>
-                    )}
-                  </View>
-                ))}
-                <Button onPress={addAllParsed} className="mt-2">
-                  <View className="flex-row items-center">
-                    <Plus size={18} color="#FFFFFF" />
-                    <Text className="text-primary-foreground font-semibold ml-2">
-                      Add All to Meal
-                    </Text>
-                  </View>
-                </Button>
-              </View>
-            )}
           </View>
         )}
 
@@ -603,14 +788,6 @@ export default function ScanMeal() {
               )}
             </View>
 
-            {searching && (
-              <ActivityIndicator
-                size="small"
-                color="#2783A6"
-                className="my-3"
-              />
-            )}
-
             {results.length > 0 && (
               <View>
                 <Text className="text-xs font-semibold text-muted-foreground uppercase mb-2">
@@ -637,7 +814,7 @@ export default function ScanMeal() {
               </View>
             )}
 
-            {!searching && query.length >= 2 && results.length === 0 && (
+            {query.length >= 2 && results.length === 0 && (
               <Text className="text-xs text-muted-foreground text-center py-4">
                 No foods found for "{query}"
               </Text>
@@ -717,13 +894,10 @@ export default function ScanMeal() {
   );
 }
 
-/* ── Camera styles ──────────────────────────────────── */
+/* ── Styles ──────────────────────────────────────────── */
 
 const styles = StyleSheet.create({
-  cameraContainer: {
-    flex: 1,
-    backgroundColor: "#000",
-  },
+  cameraContainer: { flex: 1, backgroundColor: "#000" },
   cameraPreview: {
     width: SCREEN_W,
     height: SCREEN_H,
@@ -799,12 +973,26 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     gap: 8,
   },
-  useBtn: {
-    backgroundColor: "#1A7A55",
+  useBtn: { backgroundColor: "#1A7A55" },
+  freezeBtnText: { color: "#FFFFFF", fontSize: 15, fontWeight: "600" },
+
+  // Bounding box overlay styles
+  bbox: {
+    position: "absolute",
+    borderWidth: 2,
+    borderRadius: 6,
   },
-  freezeBtnText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "600",
+  bboxLabel: {
+    position: "absolute",
+    top: -18,
+    left: -1,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  bboxLabelText: {
+    color: "#FFF",
+    fontSize: 9,
+    fontWeight: "700",
   },
 });

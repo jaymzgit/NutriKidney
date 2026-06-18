@@ -15,7 +15,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from inference_sdk import InferenceHTTPClient
 
-from routers.food import fuzzy_match, scale_food
+from routers.food import fuzzy_match
 
 router = APIRouter()
 
@@ -50,9 +50,9 @@ class DetectResponse(BaseModel):
     items: list[DetectedItem]
     raw_predictions: list[dict]
 
-# ── Default portions per detected class (grams) ────
+# ── Fallback portion for foods not in the database ──
 
-DEFAULT_PORTION_G = 150
+UNKNOWN_FOOD_PORTION_G = 150
 
 # ── POST /scan/detect ───────────────────────────────
 
@@ -104,7 +104,7 @@ async def detect_food(file: UploadFile = File(...)):
 
         if matches:
             food, match_conf = matches[0]
-            entry = scale_food(food, DEFAULT_PORTION_G)
+            entry = {**food}  # Use food's own default portion from DB
             items.append(DetectedItem(
                 name=entry["name"],
                 portion_g=entry["portion_g"],
@@ -121,7 +121,7 @@ async def detect_food(file: UploadFile = File(...)):
             # Detected but not in local DB — return with zero nutrients
             items.append(DetectedItem(
                 name=class_name.replace("-", " ").replace("_", " ").title(),
-                portion_g=DEFAULT_PORTION_G,
+                portion_g=UNKNOWN_FOOD_PORTION_G,
                 calories=0,
                 potassium_mg=0,
                 phosphorus_mg=0,
