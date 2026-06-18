@@ -104,9 +104,32 @@ If your phone can't reach the dev server:
 npx expo start --tunnel
 ```
 
-### Option B: Custom dev client (full features including YOLO)
+### Option B: Local build to device (full features including YOLO)
 
-Requires building an APK first — see section 5 below.
+Builds and installs directly to a USB-connected phone. No APK file to transfer. Requires Android SDK.
+
+**Prerequisites**:
+1. Install [Android Studio](https://developer.android.com/studio)
+2. Open Android Studio → SDK Manager → install Android SDK
+3. Set environment variable (PowerShell, run once):
+   ```powershell
+   [System.Environment]::SetEnvironmentVariable("ANDROID_HOME", "$env:LOCALAPPDATA\Android\Sdk", "User")
+   ```
+4. Restart terminal
+5. Enable USB Debugging on phone (Settings → Developer Options → USB Debugging)
+6. Connect phone via USB, accept the debugging prompt
+
+**Build and run**:
+```powershell
+npx expo prebuild --clean
+npx expo run:android
+```
+
+First build takes ~5–10 minutes (Gradle). Subsequent builds are fast. App installs directly to device and connects to Metro for hot reload.
+
+### Option C: Custom dev client via EAS (cloud build)
+
+If you don't have Android Studio, use EAS Build instead — see section 5 below.
 
 After installing the APK on your device:
 ```powershell
