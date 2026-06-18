@@ -10,4 +10,7 @@ config.resolver.blockList = exclusionList([
   /docs\/.*/,
 ]);
 
+// Bundle .tflite model files as assets
+config.resolver.assetExts = [...(config.resolver.assetExts ?? []), "tflite"];
+
 module.exports = withNativeWind(config, { input: "./global.css" });

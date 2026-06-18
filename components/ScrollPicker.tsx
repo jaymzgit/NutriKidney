@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Pressable, ScrollView, Text, View } from "react-native";
 
 const ITEM_H = 44;
 const VISIBLE = 3;
@@ -24,6 +24,7 @@ export default function ScrollPicker({
   step = 1,
   onChange,
 }: Props) {
+  const [editing, setEditing] = useState(false);
   const items: number[] = [];
   for (let v = min; v <= max; v += step) items.push(v);
 
@@ -34,13 +35,14 @@ export default function ScrollPicker({
   const pad = ((VISIBLE - 1) / 2) * ITEM_H;
 
   useEffect(() => {
-    const idx = items.indexOf(value);
+    if (!editing) return;
+    const idx = items.indexOf(valueRef.current);
     if (idx >= 0 && scrollRef.current) {
       setTimeout(() => {
         scrollRef.current?.scrollTo({ y: idx * ITEM_H, animated: false });
       }, 50);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onScrollEnd = (e: any) => {
     const y = e.nativeEvent.contentOffset.y;
@@ -50,13 +52,37 @@ export default function ScrollPicker({
     if (picked !== valueRef.current) onChange(picked);
   };
 
+  // Locked view — tap to enter edit mode
+  if (!editing) {
+    return (
+      <Pressable
+        onPress={() => setEditing(true)}
+        className="rounded-2xl border border-border bg-muted/50 overflow-hidden"
+      >
+        <View className="flex-row items-center justify-between px-4 pt-3 pb-1">
+          <Text className="text-xs font-medium text-muted-foreground">{label}</Text>
+          <Text className="text-[10px] text-muted-foreground">Tap to edit</Text>
+        </View>
+        <View style={{ height: PICKER_H }} className="items-center justify-center">
+          <Text className="text-2xl font-bold text-muted-foreground/50">
+            {value}
+          </Text>
+          <Text className="text-xs text-muted-foreground/50 mt-1">{unit}</Text>
+        </View>
+      </Pressable>
+    );
+  }
+
+  // Editing view
   return (
-    <View className="rounded-2xl border border-border bg-muted/50 overflow-hidden">
+    <View className="rounded-2xl border border-primary bg-muted/50 overflow-hidden">
       <View className="flex-row items-center justify-between px-4 pt-3 pb-1">
         <Text className="text-xs font-medium text-muted-foreground">{label}</Text>
-        <Text className="text-xs font-semibold text-primary">
-          {value} {unit}
-        </Text>
+        <Pressable onPress={() => setEditing(false)}>
+          <Text className="text-xs font-semibold text-primary">
+            {value} {unit} Done
+          </Text>
+        </Pressable>
       </View>
       <View style={{ height: PICKER_H }} className="relative">
         <View
