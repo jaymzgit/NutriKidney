@@ -3,33 +3,33 @@ import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native"
 import { Link } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
-import { AlertTriangle, ChevronRight, Droplets, Flame, FlaskConical, Utensils } from "lucide-react-native";
+import { AlertTriangle, ChevronRight, Flame, FlaskConical, Utensils } from "lucide-react-native";
 import { useAuth } from "@/lib/AuthContext";
 import { getLimitsForStage } from "@/lib/ckdLimits";
 import { getRiskLevel } from "@/lib/riskEngine";
 import NutrientProgressBar from "@/components/NutrientProgressBar";
-import MealCard, { Meal } from "@/components/MealCard";
+import MealCard from "@/components/MealCard";
 import { NutrientAlertData } from "@/components/NutrientAlert";
-import { dummyMeals } from "@/lib/dummyData";
-
-const meals: Meal[] = dummyMeals; // TODO: wire to FastAPI /logs
+import { useMeals } from "@/lib/useMeals";
 
 export default function Home() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
+  const { meals, loading, refetch } = useMeals();
   const [refreshing, setRefreshing] = useState(false);
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 800);
-  }, []);
+    await refetch();
+    setRefreshing(false);
+  }, [refetch]);
 
   const todayMeals = useMemo(() => {
     const today = new Date().toDateString();
     return meals.filter(
       (m) => new Date(m.logged_at).toDateString() === today
     );
-  }, []);
+  }, [meals]);
 
   const totals = useMemo(() => {
     return todayMeals.reduce(
@@ -58,7 +58,7 @@ export default function Home() {
       d.setDate(d.getDate() - 1);
     }
     return count;
-  }, []);
+  }, [meals]);
 
   const nutrientAlerts = useMemo<NutrientAlertData[]>(() => {
     if (!ckdStage) return [];
@@ -104,11 +104,6 @@ export default function Home() {
     limits.calories > 0 ? (totals.calories / limits.calories) * 100 : 0,
     100
   );
-
-  const fluidTotal = 0; // TODO: wire to fluid intake tracking
-  const fluidPct = limits.fluid != null && limits.fluid > 0
-    ? Math.min((fluidTotal / limits.fluid) * 100, 100)
-    : 0;
 
   const riskColors: Record<string, { bg: string; badgeBg: string; badgeText: string }> = {
     safe: { bg: "#0F6B47", badgeBg: "bg-emerald-100", badgeText: "text-emerald-700" },
@@ -228,27 +223,6 @@ export default function Home() {
             </View>
           </View>
 
-          {limits.fluid != null && (
-            <View className="mt-3 bg-white/15 rounded-xl px-4 py-2.5 border border-white/25">
-              <View className="flex-row items-center justify-between mb-1.5">
-                <View className="flex-row items-center">
-                  <Droplets size={14} color="rgba(255,255,255,0.85)" />
-                  <Text className="text-white/85 text-[13px] font-semibold uppercase ml-1.5">
-                    Fluid
-                  </Text>
-                </View>
-                <Text className="text-white/80 text-[13px]">
-                  {fluidTotal} / {limits.fluid} ml
-                </Text>
-              </View>
-              <View className="h-2 bg-white/15 rounded-full overflow-hidden">
-                <View
-                  className="h-full bg-white rounded-full"
-                  style={{ width: `${fluidPct}%` }}
-                />
-              </View>
-            </View>
-          )}
         </View>
 
         <View className="px-4">
@@ -411,6 +385,14 @@ export default function Home() {
             ) : (
               todayMeals.map((meal) => <MealCard key={meal.id} meal={meal} />)
             )}
+          </View>
+
+          <View className="mt-6 px-2 pb-2">
+            <Text className="text-[11px] text-muted-foreground/60 text-center leading-relaxed">
+              NutriKidney is for informational purposes only and is not a substitute
+              for professional medical advice, diagnosis, or treatment. Always consult
+              your nephrologist or dietitian before making dietary changes.
+            </Text>
           </View>
         </View>
       </ScrollView>

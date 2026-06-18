@@ -3,7 +3,6 @@ import {
   Camera,
   ChevronDown,
   ChevronUp,
-  Mic,
   Pencil,
 } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
@@ -11,7 +10,7 @@ import type { Meal } from "./MealCard";
 
 const methodIcons: Record<string, LucideIcon> = {
   scan: Camera,
-  voice: Mic,
+  text: Pencil,
   manual: Pencil,
 };
 

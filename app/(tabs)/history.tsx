@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Calendar, Utensils } from "lucide-react-native";
 import MealHistoryItem from "@/components/MealHistoryItem";
@@ -7,9 +7,7 @@ import type { Meal } from "@/components/MealCard";
 import { useAuth } from "@/lib/AuthContext";
 import { getLimitsForStage } from "@/lib/ckdLimits";
 import { NUTRIENT_COLORS, type NutrientKey } from "@/components/NutrientProgressBar";
-import { dummyMeals } from "@/lib/dummyData";
-
-const meals: Meal[] = dummyMeals; // TODO: wire to FastAPI /logs
+import { useMeals } from "@/lib/useMeals";
 
 type DayTotals = {
   calories: number;
@@ -41,6 +39,7 @@ const nutrientInfo: { key: NutrientKey; limitKey: keyof DayTotals; label: string
 
 export default function MealHistory() {
   const { user } = useAuth();
+  const { meals, loading } = useMeals();
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const ckdStage = user?.ckd_stage ?? null;
@@ -83,7 +82,7 @@ export default function MealHistory() {
     });
 
     return groups;
-  }, []);
+  }, [meals]);
 
   const toggle = (id: string) =>
     setExpandedId((prev) => (prev === id ? null : id));
@@ -120,7 +119,11 @@ export default function MealHistory() {
           ))}
         </View>
 
-        {meals.length === 0 ? (
+        {loading ? (
+          <View className="items-center py-16">
+            <ActivityIndicator size="large" color="#1A7A55" />
+          </View>
+        ) : meals.length === 0 ? (
           <View className="items-center py-16">
             <View className="h-20 w-20 bg-muted rounded-full items-center justify-center mb-4">
               <Utensils size={32} color="#9CA3AF" />

@@ -1,17 +1,21 @@
 import { Text, View } from "react-native";
-import { Camera, Mic, Pencil } from "lucide-react-native";
+import { Camera, Pencil } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
 
 type MealItem = {
   food_name: string;
   portion_g?: number;
   calories?: number;
+  potassium?: number;
+  phosphorus?: number;
+  sodium?: number;
+  protein?: number;
 };
 
 export type Meal = {
   id: string;
   logged_at: string;
-  method?: "scan" | "voice" | "manual";
+  method?: "scan" | "text" | "manual";
   risk_level?: "safe" | "caution" | "danger";
   total_calories?: number;
   total_potassium?: number;
@@ -25,7 +29,7 @@ export type Meal = {
 
 const methodIcons: Record<string, LucideIcon> = {
   scan: Camera,
-  voice: Mic,
+  text: Pencil,
   manual: Pencil,
 };
 

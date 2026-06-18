@@ -35,7 +35,7 @@ const rawMeals: DummyMeal[] = [
   {
     id: "m-today-2",
     logged_at: isoAt(0, 13, 5),
-    method: "voice",
+    method: "text",
     risk_level: "caution",
     meal_items: [
       { food_name: "White rice", portion_g: 250, calories: 325, potassium: 90, phosphorus: 110, sodium: 3, protein: 6 },
@@ -70,7 +70,7 @@ const rawMeals: DummyMeal[] = [
   {
     id: "m-y-2",
     logged_at: isoAt(1, 12, 30),
-    method: "voice",
+    method: "text",
     risk_level: "caution",
     meal_items: [
       { food_name: "Nasi lemak", portion_g: 300, calories: 520, potassium: 260, phosphorus: 180, sodium: 680, protein: 14 },
@@ -114,7 +114,7 @@ const rawMeals: DummyMeal[] = [
   {
     id: "m-2d-3",
     logged_at: isoAt(2, 19, 15),
-    method: "voice",
+    method: "text",
     risk_level: "safe",
     meal_items: [
       { food_name: "Chicken soup", portion_g: 300, calories: 150, potassium: 200, phosphorus: 110, sodium: 650, protein: 18 },
@@ -145,7 +145,7 @@ const rawMeals: DummyMeal[] = [
   {
     id: "m-3d-3",
     logged_at: isoAt(3, 19, 30),
-    method: "voice",
+    method: "text",
     risk_level: "safe",
     meal_items: [
       { food_name: "Steamed egg", portion_g: 120, calories: 90, potassium: 65, phosphorus: 95, sodium: 150, protein: 8 },
@@ -168,7 +168,7 @@ const rawMeals: DummyMeal[] = [
   {
     id: "m-4d-2",
     logged_at: isoAt(4, 13, 30),
-    method: "voice",
+    method: "text",
     risk_level: "caution",
     meal_items: [
       { food_name: "Laksa", portion_g: 400, calories: 580, potassium: 350, phosphorus: 200, sodium: 1400, protein: 20 },
@@ -209,7 +209,7 @@ const rawMeals: DummyMeal[] = [
   {
     id: "m-5d-3",
     logged_at: isoAt(5, 19, 20),
-    method: "voice",
+    method: "text",
     risk_level: "caution",
     meal_items: [
       { food_name: "Rendang chicken", portion_g: 150, calories: 320, potassium: 340, phosphorus: 220, sodium: 580, protein: 28 },
@@ -240,7 +240,7 @@ const rawMeals: DummyMeal[] = [
   {
     id: "m-6d-3",
     logged_at: isoAt(6, 19, 45),
-    method: "voice",
+    method: "text",
     risk_level: "safe",
     meal_items: [
       { food_name: "Steamed tofu", portion_g: 150, calories: 110, potassium: 180, phosphorus: 140, sodium: 12, protein: 12 },
