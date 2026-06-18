@@ -64,6 +64,66 @@ Two apps in one repo:
 - **Mobile** (root) — Expo SDK 54 + expo-router + React Native 0.81 + NativeWind 4 + TypeScript. New Architecture enabled. Path alias `@/*` resolves from repo root.
 - **Backend** (`backend/`) — FastAPI service; routers under `backend/routers/` mounted at `/auth`, `/food`, `/logs`, `/ocr`, `/scan`. Static food data at `backend/data/food_db.json` (loaded at import time by `routers/food.py` — missing file crashes startup).
 
+### Dependencies
+
+#### Mobile (npm)
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| expo | ~54.0.33 | Expo SDK — managed native workflow |
+| react | 19.1.0 | UI framework |
+| react-native | 0.81.5 | Mobile runtime (New Architecture enabled) |
+| expo-router | ~6.0.24 | File-based routing with typed routes |
+| nativewind | ^4.2.4 | Tailwind CSS for React Native |
+| tailwindcss | ^3.4.19 | Utility-first CSS (used by NativeWind) |
+| @supabase/supabase-js | ^2.107.0 | Supabase client (auth + DB) |
+| react-native-fast-tflite | ^3.0.1 | On-device TFLite model inference (YOLO26) |
+| jpeg-js | ^0.4.4 | Pure-JS JPEG decode for model preprocessing |
+| expo-camera | ~17.0.10 | Camera access for food scanning |
+| expo-image-picker | ~17.0.11 | Photo gallery access |
+| expo-image-manipulator | ~14.0.8 | Image resize for model input (640×640) |
+| expo-web-browser | ~15.0.11 | Google OAuth redirect |
+| expo-linking | ~8.0.12 | Deep link handling (nutrikidney://auth-callback) |
+| expo-auth-session | ~7.0.11 | OAuth session management |
+| expo-dev-client | ~6.0.21 | Custom dev client (required for native modules) |
+| expo-system-ui | ~6.0.9 | System UI style configuration |
+| react-native-reanimated | ~4.1.1 | Animations |
+| react-native-worklets | 0.5.1 | Required by Reanimated 4 |
+| react-native-gesture-handler | ~2.28.0 | Touch gesture system |
+| react-native-screens | ~4.16.0 | Native screen containers |
+| react-native-safe-area-context | ~5.6.0 | Safe area insets |
+| react-native-svg | 15.12.1 | SVG rendering (charts, icons) |
+| react-native-url-polyfill | ^3.0.0 | URL polyfill for Supabase |
+| @react-native-async-storage/async-storage | 2.2.0 | Persistent storage (auth tokens) |
+| lucide-react-native | ^1.17.0 | Icon library |
+| expo-constants | ~18.0.13 | App constants |
+| expo-status-bar | ~3.0.9 | Status bar styling |
+| expo-crypto | ~15.0.9 | Crypto utilities |
+
+**Dev dependencies**: TypeScript ~5.9.2, @types/react ~19.1.0
+
+#### Backend (pip)
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| fastapi | >=0.115.0 | Web framework |
+| uvicorn | >=0.32.0 | ASGI server |
+| python-dotenv | >=1.0.0 | .env file loading |
+| supabase | >=2.10.0 | Supabase Python client (service role) |
+| pydantic | >=2.0.0 | Request/response validation |
+| python-multipart | >=0.0.9 | File upload handling |
+| PyJWT[crypto] | >=2.8.0 | JWT decode + RS256 verification |
+| httpx | >=0.27.0 | HTTP client (fetch Supabase JWKS) |
+| inference-sdk | >=1.3.0 | Roboflow inference API client |
+
+#### Build tools
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| eas-cli | 20.3.0 | Expo Application Services (cloud builds) |
+| Node.js | 24.x | JavaScript runtime |
+| Python | 3.8+ | Backend runtime |
+
 ### Directory overview
 
 ```
@@ -239,7 +299,8 @@ Supabase is the auth source of truth. Backend does **not** issue tokens.
 - `lib/AuthContext.tsx` — `AuthProvider` wraps the app in `app/_layout.tsx`. Subscribes to `supabase.auth.onAuthStateChange` and toggles `supabase.auth.startAutoRefresh/stopAutoRefresh` on `AppState` foreground/background.
 - `app/_layout.tsx` `AuthGate` — route guard. Redirects unauth'd users to `/(auth)/login`, auth'd users out of `(auth)` to `/(tabs)`.
 - Google OAuth uses `expo-web-browser` + `expo-linking` deep link (`nutrikidney://auth-callback`), then `supabase.auth.setSession` from the returned fragment params.
-- `lib/api.ts` `apiFetch` attaches the current Supabase access token as `Authorization: Bearer …` to every backend call. New endpoints that need auth should validate this JWT against the Supabase JWKS — `routers/auth.py` validates via `get_current_user` dependency.
+- `lib/api.ts` `apiFetch` attaches the current Supabase access token as `Authorization: Bearer …` to every backend call.
+- `routers/auth.py` `get_current_user` dependency validates JWT against Supabase JWKS (RS256). Used by `logs.py` on all endpoints — `user_id` derived from token, not request body.
 
 ### Routing
 
@@ -308,7 +369,7 @@ Each entry: `{ name, class_label, aliases[], portion_g, calories, potassium_mg, 
 
 - `food/lookup` and `food/parse` are **stateless** — they only read the in-memory `FOOD_DB` (JSON file loaded once). Nutrient scaling via `scale_food` is linear from the DB portion.
 - `food/parse` uses a regex ladder (`PORTION_PATTERNS`) for portion units (plate/bowl/cup/piece/etc.) → grams, then `SequenceMatcher` fuzzy match on name+aliases (threshold 0.4). Unknown foods return with zero nutrients and `confidence=0.1`.
-- `logs/meals` writes to Supabase tables `meal_logs` (parent) + `meal_items` (children) using the service-role client. Currently trusts `user_id` from the request body — when wiring auth, derive it from the verified JWT instead.
+- `logs/meals` writes to Supabase tables `meal_logs` (parent) + `meal_items` (children) using the service-role client. All endpoints use `get_current_user` dependency — `user_id` derived from verified JWT.
 - `scan/detect` sends image to Roboflow inference API (`malaysian-food-recognition-ourez/5` model), cross-references detections with food DB. Used as fallback when on-device model unavailable.
 - `ocr/extract` is a Phase-3 placeholder; only validates content-type and returns empty results.
 
@@ -368,4 +429,4 @@ All health/lifestyle data stored as `user_metadata` on the Supabase auth user.
 - **Offline logging**: Queue meals locally when offline, sync to Supabase on reconnect. Needs `@react-native-community/netinfo` + AsyncStorage queue.
 - **Chat**: CKD AI assistant (RAG-powered) — UI placeholder exists, functionality disabled.
 - **Lab report OCR**: `ocr/extract` endpoint is a stub. Phase 3.
-- **Auth on meal logging**: `logs/meals` currently trusts `user_id` from request body. Should derive from verified JWT.
+- **Auth hardening**: CORS is wide open (`allow_origins=["*"]`). Must restrict before deploy.
