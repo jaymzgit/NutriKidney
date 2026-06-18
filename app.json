@@ -24,7 +24,11 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.nutrikidney.app"
+      "package": "com.nutrikidney.app",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -43,10 +47,17 @@
         {
           "photosPermission": "NutriKidney needs photo library access to upload meal photos."
         }
-      ]
+      ],
+      "react-native-fast-tflite"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "c2dd0144-d6d1-443e-9fc2-a16ca68b3268"
+      }
     }
   }
 }
