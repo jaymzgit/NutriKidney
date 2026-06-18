@@ -20,3 +20,5 @@ backend\venv\Lib\site-packages
 QNA.md
 PLAN.md
 node_modules
+/android
+/ios
