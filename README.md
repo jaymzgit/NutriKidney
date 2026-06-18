@@ -173,7 +173,7 @@ Anchovies, Boiled Egg, Char Kuey Teow, Chicken Rendang, Cucumber, Curry Puff, Fr
 ```bash
 pip install ultralytics
 
-# Export dataset from Roboflow as "YOLOv8" format
+# Export dataset from Roboflow as "YOLO26" format
 yolo detect train data=path/to/data.yaml model=yolo26n.pt epochs=100 imgsz=640
 yolo export model=runs/detect/train/weights/best.pt format=tflite half=True
 
