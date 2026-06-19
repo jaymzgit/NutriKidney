@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -27,7 +27,17 @@ import ScrollPicker from "@/components/ScrollPicker";
 import { useAuth } from "@/lib/AuthContext";
 import { supabase } from "@/lib/supabase";
 
-type WeightEntry = { weight_kg: number; recorded_at: string };
+type WeightEntry = { id: string; weight_kg: number; recorded_at: string };
+
+function fmtDate(d: string) {
+  return new Date(d).toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 const CKD_STAGES = [
   { value: "1", label: "1" },
@@ -95,7 +105,15 @@ function TogglePill({ label, active, onPress }: { label: string; active: boolean
 
 /* ── Weight chart (SVG) ────────────────────────────── */
 
-function WeightChart({ data, width }: { data: WeightEntry[]; width: number }) {
+function WeightChart({
+  data,
+  width,
+  onPointPress,
+}: {
+  data: WeightEntry[];
+  width: number;
+  onPointPress: (entry: WeightEntry) => void;
+}) {
   if (data.length < 2) {
     return (
       <View className="items-center py-6">
@@ -151,14 +169,29 @@ function WeightChart({ data, width }: { data: WeightEntry[]; width: number }) {
       <Path d={areaPath} fill="#1A7A55" fillOpacity={0.08} />
       {/* Line */}
       <Path d={linePath} fill="none" stroke="#1A7A55" strokeWidth={2} strokeLinejoin="round" />
-      {/* Dots */}
+      {/* Dots — wider transparent hit area + visible inner dot */}
       {points.map((p, i) => (
-        <SvgCircle key={`d${i}`} cx={p.x} cy={p.y} r={3} fill="#1A7A55" />
+        <G key={`d${i}`}>
+          <SvgCircle
+            cx={p.x}
+            cy={p.y}
+            r={14}
+            fill="transparent"
+            onPress={() => onPointPress(data[i])}
+          />
+          <SvgCircle
+            cx={p.x}
+            cy={p.y}
+            r={4}
+            fill="#1A7A55"
+            onPress={() => onPointPress(data[i])}
+          />
+        </G>
       ))}
       {/* X labels */}
       {data.map((d, i) => {
         if (i % xInterval !== 0 && i !== data.length - 1) return null;
-        const label = new Date(d.recorded_at + "T00:00:00").toLocaleDateString("en-GB", {
+        const label = new Date(d.recorded_at).toLocaleDateString("en-GB", {
           day: "numeric",
           month: "short",
         });
@@ -196,15 +229,20 @@ export default function Profile() {
   const [saving, setSaving] = useState(false);
   const [weightHistory, setWeightHistory] = useState<WeightEntry[]>([]);
   const [chartWidth, setChartWidth] = useState(0);
+  const [autoSaving, setAutoSaving] = useState(false);
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedBasics = useRef<{ w: string; h: string; a: string } | null>(
+    null
+  );
 
   const fetchWeightHistory = useCallback(async () => {
     if (!user) return;
     const { data } = await supabase
       .from("weight_history")
-      .select("weight_kg, recorded_at")
+      .select("id, weight_kg, recorded_at")
       .eq("user_id", user.id)
       .order("recorded_at", { ascending: true })
-      .limit(30);
+      .limit(60);
     if (data) setWeightHistory(data);
   }, [user]);
 
@@ -229,14 +267,60 @@ export default function Profile() {
     }, [user, fetchWeightHistory])
   );
 
+  // Auto-save weight/height/age (debounced 800ms after last change)
+  useEffect(() => {
+    if (!user) return;
+    const key = { w: weight, h: height, a: age };
+    // Skip initial sync from user values
+    if (lastSavedBasics.current === null) {
+      lastSavedBasics.current = key;
+      return;
+    }
+    // No-op if unchanged
+    if (
+      lastSavedBasics.current.w === weight &&
+      lastSavedBasics.current.h === height &&
+      lastSavedBasics.current.a === age
+    ) {
+      return;
+    }
+
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(async () => {
+      setAutoSaving(true);
+      try {
+        const prevW = lastSavedBasics.current?.w;
+        await updateProfile({
+          weight_kg: weight ? Number(weight) : null,
+          height_cm: height ? Number(height) : null,
+          age: age ? Number(age) : null,
+        });
+        // Insert weight_history only if weight actually changed
+        if (weight && weight !== prevW) {
+          const { error: whErr } = await supabase
+            .from("weight_history")
+            .insert({ user_id: user.id, weight_kg: Number(weight) });
+          if (!whErr) await fetchWeightHistory();
+          else console.log("[weight_history] insert failed:", whErr.message);
+        }
+        lastSavedBasics.current = key;
+      } catch (e: any) {
+        console.log("[autosave] failed:", e?.message);
+      } finally {
+        setAutoSaving(false);
+      }
+    }, 800);
+
+    return () => {
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    };
+  }, [weight, height, age, user, updateProfile, fetchWeightHistory]);
+
   const handleSave = async () => {
     setSaving(true);
     try {
       await updateProfile({
         ckd_stage: ckdStage,
-        weight_kg: weight ? Number(weight) : null,
-        height_cm: height ? Number(height) : null,
-        age: age ? Number(age) : null,
         gender: gender || null,
         has_diabetes: hasDiabetes,
         has_hypertension: hasHypertension,
@@ -247,21 +331,6 @@ export default function Profile() {
         diagnosis_date: diagnosisDate || null,
       });
 
-      // Log weight to history (non-blocking — table may not exist yet)
-      if (weight && user) {
-        supabase
-          .from("weight_history")
-          .upsert(
-            {
-              user_id: user.id,
-              weight_kg: Number(weight),
-              recorded_at: new Date().toISOString().split("T")[0],
-            },
-            { onConflict: "user_id,recorded_at" }
-          )
-          .then(() => fetchWeightHistory());
-      }
-
       Alert.alert("Saved", "Profile updated successfully");
     } catch (err: any) {
       Alert.alert("Error", err?.message || "Failed to save");
@@ -269,6 +338,35 @@ export default function Profile() {
       setSaving(false);
     }
   };
+
+  const handleDeleteWeight = useCallback(
+    (entry: WeightEntry) => {
+      if (!user) return;
+      Alert.alert(
+        "Delete weight entry?",
+        `${entry.weight_kg} kg on ${fmtDate(entry.recorded_at)}`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: async () => {
+              const { error } = await supabase
+                .from("weight_history")
+                .delete()
+                .eq("id", entry.id);
+              if (error) {
+                Alert.alert("Error", error.message);
+                return;
+              }
+              await fetchWeightHistory();
+            },
+          },
+        ]
+      );
+    },
+    [user, fetchWeightHistory]
+  );
 
   const handleLogout = () => {
     Alert.alert("Sign out", "Are you sure?", [
@@ -312,7 +410,14 @@ export default function Profile() {
         {/* Weight History Graph */}
         <View className="bg-card rounded-xl border border-border p-4 mb-5">
           <View className="flex-row items-center justify-between mb-2">
-            <SectionHeader icon={TrendingUp} label="Weight History" />
+            <View className="flex-row items-center">
+              <SectionHeader icon={TrendingUp} label="Weight History" />
+              {autoSaving && (
+                <Text className="text-[10px] text-muted-foreground ml-2 mb-3">
+                  Saving…
+                </Text>
+              )}
+            </View>
             {weight ? (
               <View className="flex-row items-baseline">
                 <Text className="text-lg font-bold text-foreground">{weight}</Text>
@@ -331,7 +436,18 @@ export default function Profile() {
             ) : null}
           </View>
           <View onLayout={(e) => setChartWidth(e.nativeEvent.layout.width)}>
-            {chartWidth > 0 && <WeightChart data={weightHistory} width={chartWidth} />}
+            {chartWidth > 0 && (
+              <WeightChart
+                data={weightHistory}
+                width={chartWidth}
+                onPointPress={handleDeleteWeight}
+              />
+            )}
+            {weightHistory.length >= 2 && (
+              <Text className="text-[10px] text-muted-foreground text-center mt-1">
+                Tap a point to delete that entry
+              </Text>
+            )}
           </View>
         </View>
 

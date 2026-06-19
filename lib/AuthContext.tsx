@@ -165,7 +165,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (key in patch) row[key] = (patch as any)[key];
       }
       if (Object.keys(row).length > 0) {
-        supabase.from("profiles").update(row).eq("id", userId).then(() => {});
+        const { error: pErr } = await supabase
+          .from("profiles")
+          .upsert({ id: userId, ...row });
+        if (pErr) console.log("[profiles] upsert failed:", pErr.message);
       }
     }
   }, []);

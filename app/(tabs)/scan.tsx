@@ -16,6 +16,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { useRouter } from "expo-router";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
+import * as ImageManipulator from "expo-image-manipulator";
 import {
   Camera,
   Check,
@@ -29,9 +30,9 @@ import {
 } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
 import Button from "@/components/Button";
-import { api } from "@/lib/api";
-import { detectFood, isModelLoaded, loadModel } from "@/lib/yolo";
+import { detectFood, isModelLoaded } from "@/lib/yolo";
 import { matchFood, scaleFood, searchFoods } from "@/lib/foodDb";
+import { createMeal } from "@/lib/mealsRepo";
 
 /* ── Types ──────────────────────────────────────────── */
 
@@ -120,6 +121,7 @@ export default function ScanMeal() {
 
   // Review
   const [showReview, setShowReview] = useState(false);
+  const [scanSource, setScanSource] = useState<"device" | "api" | null>(null);
   const [scanImageUri, setScanImageUri] = useState<string | null>(null);
   const [scanImageSize, setScanImageSize] = useState<{
     w: number;
@@ -134,17 +136,19 @@ export default function ScanMeal() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  // Load YOLO model on mount
+  // Model preloaded at root layout — just track ready state
   useEffect(() => {
-    loadModel()
-      .then(() => {
-        console.log("[YOLO] Model loaded OK");
+    if (isModelLoaded()) {
+      setModelReady(true);
+      return;
+    }
+    const t = setInterval(() => {
+      if (isModelLoaded()) {
         setModelReady(true);
-      })
-      .catch((err) => {
-        console.log("[YOLO] Model load FAILED:", err?.message ?? err);
-        setModelReady(false);
-      });
+        clearInterval(t);
+      }
+    }, 250);
+    return () => clearInterval(t);
   }, []);
 
   // Auto-close review when cart empties
@@ -201,13 +205,27 @@ export default function ScanMeal() {
     setShowCamera(true);
   }, [permission, requestPermission]);
 
+  // Re-encode image to bake EXIF orientation into pixels.
+  // Without this, RN <Image> rotates per EXIF but jpeg-js decoder doesn't,
+  // so model coords + display overlay drift.
+  const bakeOrientation = async (uri: string): Promise<string> => {
+    const out = await ImageManipulator.manipulateAsync(uri, [], {
+      format: ImageManipulator.SaveFormat.JPEG,
+      compress: 0.9,
+    });
+    return out.uri;
+  };
+
   const takePicture = useCallback(async () => {
     if (!cameraRef.current) return;
     const photo = await cameraRef.current.takePictureAsync({
       quality: 0.8,
       base64: false,
     });
-    if (photo?.uri) setCapturedUri(photo.uri);
+    if (photo?.uri) {
+      const baked = await bakeOrientation(photo.uri);
+      setCapturedUri(baked);
+    }
   }, []);
 
   const pickFromGallery = useCallback(async () => {
@@ -216,7 +234,8 @@ export default function ScanMeal() {
       quality: 0.8,
     });
     if (!result.canceled && result.assets[0]) {
-      setCapturedUri(result.assets[0].uri);
+      const baked = await bakeOrientation(result.assets[0].uri);
+      setCapturedUri(baked);
       setShowCamera(true);
     }
   }, []);
@@ -232,6 +251,7 @@ export default function ScanMeal() {
       let imgH = 0;
 
       if (isModelLoaded()) {
+        setScanSource("device");
         // ─── On-device YOLO ──────────────────────
         const { detections, imageWidth, imageHeight } =
           await detectFood(capturedUri);
@@ -285,6 +305,7 @@ export default function ScanMeal() {
           };
         });
       } else {
+        setScanSource("api");
         // ─── API fallback ────────────────────────
         const formData = new FormData();
         formData.append("file", {
@@ -365,7 +386,7 @@ export default function ScanMeal() {
     if (cart.length === 0) return;
     setSubmitting(true);
     try {
-      await api.post("/logs/meals", {
+      await createMeal({
         method: active,
         items: cart.map((c) => ({
           food_name: c.name,
@@ -406,7 +427,7 @@ export default function ScanMeal() {
           <Image
             source={{ uri: capturedUri }}
             style={styles.cameraPreview}
-            resizeMode="cover"
+            resizeMode="contain"
           />
         ) : (
           <CameraView
@@ -498,7 +519,15 @@ export default function ScanMeal() {
           {/* Header */}
           <View className="flex-row items-center mb-4">
             <Pressable
-              onPress={() => setShowReview(false)}
+              onPress={() => {
+                setShowReview(false);
+                setCart([]);
+                setScanImageUri(null);
+                setScanImageSize(null);
+                setScanSource(null);
+                setCapturedUri(null);
+                setShowCamera(false);
+              }}
               className="mr-3 p-1"
             >
               <X size={20} color="#6B7280" />
@@ -506,6 +535,23 @@ export default function ScanMeal() {
             <Text className="text-lg font-bold text-foreground">
               Review Your Meal
             </Text>
+            {scanSource && (
+              <View
+                className={`ml-auto px-2 py-1 rounded-full ${
+                  scanSource === "device" ? "bg-primary/15" : "bg-amber-100"
+                }`}
+              >
+                <Text
+                  className={`text-[10px] font-semibold ${
+                    scanSource === "device"
+                      ? "text-primary"
+                      : "text-amber-800"
+                  }`}
+                >
+                  {scanSource === "device" ? "On-Device YOLO26" : "Cloud API"}
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* Image with bounding box overlays */}
@@ -519,32 +565,47 @@ export default function ScanMeal() {
                 style={{ width: displayW, height: displayH }}
                 resizeMode="cover"
               />
-              {cart.map((item, idx) => {
-                if (!item.bbox || !scanImageSize) return null;
+              {cart.flatMap((item, idx) => {
+                if (!item.bbox || !scanImageSize) return [];
                 const sx = displayW / scanImageSize.w;
                 const sy = displayH / scanImageSize.h;
                 const color = BBOX_COLORS[idx % BBOX_COLORS.length];
-                return (
+                const left = item.bbox.x * sx;
+                const top = item.bbox.y * sy;
+                const w = item.bbox.w * sx;
+                const h = item.bbox.h * sy;
+                return [
                   <View
                     key={`bbox-${item.id}`}
+                    pointerEvents="none"
                     style={[
                       styles.bbox,
                       {
-                        left: item.bbox.x * sx,
-                        top: item.bbox.y * sy,
-                        width: item.bbox.w * sx,
-                        height: item.bbox.h * sy,
+                        left,
+                        top,
+                        width: w,
+                        height: h,
                         borderColor: color,
                       },
                     ]}
+                  />,
+                  <View
+                    key={`lbl-${item.id}`}
+                    pointerEvents="none"
+                    style={[
+                      styles.bboxLabel,
+                      {
+                        backgroundColor: color,
+                        left,
+                        top: Math.max(0, top - 16),
+                      },
+                    ]}
                   >
-                    <View style={[styles.bboxLabel, { backgroundColor: color }]}>
-                      <Text style={styles.bboxLabelText}>
-                        {item.name} {Math.round(item.confidence * 100)}%
-                      </Text>
-                    </View>
-                  </View>
-                );
+                    <Text style={styles.bboxLabelText} numberOfLines={1}>
+                      {item.name} {Math.round(item.confidence * 100)}%
+                    </Text>
+                  </View>,
+                ];
               })}
             </View>
           )}
@@ -990,15 +1051,15 @@ const styles = StyleSheet.create({
   },
   bboxLabel: {
     position: "absolute",
-    top: -18,
-    left: -1,
     paddingHorizontal: 6,
     paddingVertical: 1,
     borderRadius: 4,
+    alignSelf: "flex-start",
   },
   bboxLabelText: {
     color: "#FFF",
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: "700",
+    flexShrink: 0,
   },
 });

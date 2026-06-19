@@ -5,6 +5,7 @@ import { ActivityIndicator, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { useEffect } from "react";
 import { AuthProvider, useAuth } from "@/lib/AuthContext";
+import { loadModel } from "@/lib/yolo";
 
 function AuthGate() {
   const { isAuthenticated, isLoadingAuth } = useAuth();
@@ -48,6 +49,14 @@ function AuthGate() {
 }
 
 export default function RootLayout() {
+  useEffect(() => {
+    loadModel()
+      .then(() => console.log("[YOLO] Model loaded OK (root)"))
+      .catch((err) =>
+        console.log("[YOLO] Model load FAILED (root):", err?.message ?? err)
+      );
+  }, []);
+
   return (
     <SafeAreaProvider>
       <AuthProvider>

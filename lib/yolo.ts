@@ -18,14 +18,15 @@
 
 import { Image } from "react-native";
 import * as ImageManipulator from "expo-image-manipulator";
-import { Asset } from "expo-asset";
 import { decode as decodeJpeg } from "jpeg-js";
 
 // ── Configuration ───────────────────────────────────
 
 const MODEL_INPUT_SIZE = 640;
-const CONFIDENCE_THRESHOLD = 0.25;
-const IOU_THRESHOLD = 0.45;
+const CONFIDENCE_THRESHOLD = 0.2;
+const IOU_THRESHOLD = 0.3;
+const MIN_BOX_AREA_FRACTION = 0.003;
+const MAX_DETECTIONS = 10;
 
 /**
  * Class names matching Roboflow project order (alphabetical).
@@ -78,13 +79,10 @@ export async function loadModel(): Promise<void> {
 
   // Resolve asset to a concrete file URI (Metro dev returns http URL; APK returns file://).
   // fast-tflite v3 native side requires {url} object — passing raw require() id fails on Android.
-  const asset = Asset.fromModule(
-    require("@/assets/models/food_detect.tflite")
+  _model = await loadTensorflowModel(
+    require("@/assets/models/food_detect.tflite"),
+    []
   );
-  await asset.downloadAsync();
-  const url = asset.localUri ?? asset.uri;
-
-  _model = await loadTensorflowModel({ url });
 }
 
 export function isModelLoaded(): boolean {
@@ -103,37 +101,67 @@ function getImageSize(
 
 // ── Preprocessing ───────────────────────────────────
 
+type LetterboxInfo = {
+  scale: number;
+  padX: number; // pixels of padding on left (or right; symmetric)
+  padY: number;
+};
+
 async function preprocessImage(uri: string): Promise<{
   input: Float32Array;
   origWidth: number;
   origHeight: number;
+  letterbox: LetterboxInfo;
 }> {
-  // Original dimensions
   const { width: origWidth, height: origHeight } = await getImageSize(uri);
 
-  // Resize to model input (stretch to square — simpler coord mapping)
+  // Letterbox: resize maintaining aspect ratio, pad to square.
+  const scale = Math.min(
+    MODEL_INPUT_SIZE / origWidth,
+    MODEL_INPUT_SIZE / origHeight
+  );
+  const newW = Math.round(origWidth * scale);
+  const newH = Math.round(origHeight * scale);
+  const padX = Math.floor((MODEL_INPUT_SIZE - newW) / 2);
+  const padY = Math.floor((MODEL_INPUT_SIZE - newH) / 2);
+
+  // Resize keeping aspect ratio
   const resized = await ImageManipulator.manipulateAsync(
     uri,
-    [{ resize: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE } }],
+    [{ resize: { width: newW, height: newH } }],
     { format: ImageManipulator.SaveFormat.JPEG, compress: 0.9 }
   );
 
-  // Read resized image bytes via fetch, decode JPEG to RGBA pixels
   const response = await fetch(resized.uri);
   const arrayBuffer = await response.arrayBuffer();
   const bytes = new Uint8Array(arrayBuffer);
   const { data } = decodeJpeg(bytes, { useTArray: true, formatAsRGBA: true });
 
-  // Convert to NCHW float32 normalized [0,1]
+  // Build NCHW float32 padded canvas (gray 114/255 like Ultralytics default).
   const pixels = MODEL_INPUT_SIZE * MODEL_INPUT_SIZE;
   const input = new Float32Array(3 * pixels);
-  for (let i = 0; i < pixels; i++) {
-    input[i] = data[i * 4] / 255; // R
-    input[pixels + i] = data[i * 4 + 1] / 255; // G
-    input[2 * pixels + i] = data[i * 4 + 2] / 255; // B
+  const PAD_VAL = 114 / 255;
+  input.fill(PAD_VAL);
+
+  // Copy resized pixels into padded canvas
+  for (let y = 0; y < newH; y++) {
+    for (let x = 0; x < newW; x++) {
+      const src = (y * newW + x) * 4;
+      const dstX = padX + x;
+      const dstY = padY + y;
+      const idx = dstY * MODEL_INPUT_SIZE + dstX;
+      input[idx] = data[src] / 255;
+      input[pixels + idx] = data[src + 1] / 255;
+      input[2 * pixels + idx] = data[src + 2] / 255;
+    }
   }
 
-  return { input, origWidth, origHeight };
+  return {
+    input,
+    origWidth,
+    origHeight,
+    letterbox: { scale, padX, padY },
+  };
 }
 
 // ── Post-processing ─────────────────────────────────
@@ -167,51 +195,92 @@ function nms(dets: Detection[], threshold: number): Detection[] {
 function postProcess(
   rawOutput: ArrayBuffer,
   origWidth: number,
-  origHeight: number
+  origHeight: number,
+  letterbox: LetterboxInfo
 ): Detection[] {
   const output = new Float32Array(rawOutput);
   const numClasses = CLASS_NAMES.length;
-  const numValues = 4 + numClasses;
-  // Derive anchor count from tensor size (robust across YOLO versions)
-  const numDetections = Math.floor(output.length / numValues);
+
+  // Model exports with NMS=True: shape [1, max_dets, 6]
+  // Each row: [x1, y1, x2, y2, score, class_idx], coords normalized [0,1]
+  // of the 640x640 padded input.
+  const STRIDE = 6;
+  const numDetections = Math.floor(output.length / STRIDE);
+  const { scale, padX, padY } = letterbox;
 
   const detections: Detection[] = [];
 
   for (let i = 0; i < numDetections; i++) {
-    // Ultralytics output: [1, 4+numClasses, numDetections]
-    // Row-major: value at [row][col] = output[row * numDetections + col]
-    let maxScore = 0;
-    let maxIdx = 0;
-    for (let c = 0; c < numClasses; c++) {
-      const score = output[(4 + c) * numDetections + i];
-      if (score > maxScore) {
-        maxScore = score;
-        maxIdx = c;
-      }
-    }
+    const base = i * STRIDE;
+    const score = output[base + 4];
+    if (score < CONFIDENCE_THRESHOLD) continue;
 
-    if (maxScore < CONFIDENCE_THRESHOLD) continue;
+    const classIdx = Math.round(output[base + 5]);
+    if (classIdx < 0 || classIdx >= numClasses) continue;
 
-    const xc = output[0 * numDetections + i];
-    const yc = output[1 * numDetections + i];
-    const w = output[2 * numDetections + i];
-    const h = output[3 * numDetections + i];
+    // TFLite Object Detection convention: [y1, x1, y2, x2] normalized.
+    // Norm [0,1] → pixels of 640 padded canvas
+    const y1p = output[base + 0] * MODEL_INPUT_SIZE;
+    const x1p = output[base + 1] * MODEL_INPUT_SIZE;
+    const y2p = output[base + 2] * MODEL_INPUT_SIZE;
+    const x2p = output[base + 3] * MODEL_INPUT_SIZE;
 
-    // Map from 640x640 model space to original image space
-    const sx = origWidth / MODEL_INPUT_SIZE;
-    const sy = origHeight / MODEL_INPUT_SIZE;
+    // Reverse letterbox: subtract pad, divide by scale
+    const x1 = (x1p - padX) / scale;
+    const y1 = (y1p - padY) / scale;
+    const x2 = (x2p - padX) / scale;
+    const y2 = (y2p - padY) / scale;
+
+    const x = Math.max(0, Math.min(origWidth, x1));
+    const y = Math.max(0, Math.min(origHeight, y1));
+    const w = Math.max(0, Math.min(origWidth, x2)) - x;
+    const h = Math.max(0, Math.min(origHeight, y2)) - y;
+
+    if (w <= 0 || h <= 0) continue;
 
     detections.push({
-      x: (xc - w / 2) * sx,
-      y: (yc - h / 2) * sy,
-      width: w * sx,
-      height: h * sy,
-      className: CLASS_NAMES[maxIdx],
-      confidence: Math.round(maxScore * 100) / 100,
+      x,
+      y,
+      width: w,
+      height: h,
+      className: CLASS_NAMES[classIdx],
+      confidence: Math.round(score * 100) / 100,
     });
   }
 
-  return nms(detections, IOU_THRESHOLD);
+  // Log raw above-threshold detections for diagnosis
+  console.log(
+    "[YOLO] raw detections:",
+    detections
+      .map((d) => `${d.className}=${d.confidence}`)
+      .join(", ")
+  );
+
+  // Drop tiny boxes (noise)
+  const imgArea = origWidth * origHeight;
+  const filtered = detections.filter(
+    (d) => (d.width * d.height) / imgArea >= MIN_BOX_AREA_FRACTION
+  );
+
+  // Dedupe by class — keep highest-confidence box per className
+  const byClass = new Map<string, Detection>();
+  for (const d of filtered) {
+    const cur = byClass.get(d.className);
+    if (!cur || d.confidence > cur.confidence) byClass.set(d.className, d);
+  }
+  const deduped = Array.from(byClass.values());
+
+  const kept = nms(deduped, IOU_THRESHOLD);
+  console.log(
+    `[YOLO] kept=${kept.length} (raw=${detections.length}, after-dedupe=${deduped.length})`
+  );
+  if (kept[0]) {
+    const b = kept[0];
+    console.log(
+      `[YOLO] first bbox: ${b.className} x=${b.x.toFixed(0)} y=${b.y.toFixed(0)} w=${b.width.toFixed(0)} h=${b.height.toFixed(0)} (img ${origWidth}x${origHeight})`
+    );
+  }
+  return kept.slice(0, MAX_DETECTIONS);
 }
 
 // ── Public API ──────────────────────────────────────
@@ -223,9 +292,10 @@ export async function detectFood(imageUri: string): Promise<{
 }> {
   if (!_model) throw new Error("Model not loaded. Call loadModel() first.");
 
-  const { input, origWidth, origHeight } = await preprocessImage(imageUri);
+  const { input, origWidth, origHeight, letterbox } =
+    await preprocessImage(imageUri);
   const outputs = _model.runSync([input.buffer as ArrayBuffer]);
-  const detections = postProcess(outputs[0], origWidth, origHeight);
+  const detections = postProcess(outputs[0], origWidth, origHeight, letterbox);
 
   return { detections, imageWidth: origWidth, imageHeight: origHeight };
 }

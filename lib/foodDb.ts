@@ -108,34 +108,47 @@ export function scaleFood(food: FoodEntry, targetPortion: number): FoodEntry {
   };
 }
 
-/** Fuzzy search the food database (for manual search mode). */
+/**
+ * Substring search the food database (manual search mode).
+ * Splits query into words; each word must appear inside some
+ * name/alias/class_label token. No Levenshtein noise.
+ */
 export function searchFoods(
   query: string,
   limit = 10
 ): Array<{ food: FoodEntry; confidence: number }> {
-  if (query.trim().length < 2) return [];
   const q = query.toLowerCase().trim();
+  if (q.length < 2) return [];
+
+  const queryWords = q.split(/\s+/).filter(Boolean);
 
   const results: Array<{ food: FoodEntry; confidence: number }> = [];
 
-  const scoreToken = (token: string): number => {
-    const t = token.toLowerCase();
-    if (!t) return 0;
-    let s = similarity(q, t);
-    if (t.includes(q) || q.includes(t)) s = Math.min(s + 0.4, 1.0);
-    return s;
-  };
-
   for (const food of db) {
-    let best = scoreToken(food.name);
-    best = Math.max(best, scoreToken(food.class_label.replace(/[_-]/g, " ")));
-    for (const alias of food.aliases ?? []) {
-      best = Math.max(best, scoreToken(alias));
+    const haystacks: string[] = [
+      food.name.toLowerCase(),
+      food.class_label.toLowerCase().replace(/[_-]/g, " "),
+      ...(food.aliases ?? []).map((a) => a.toLowerCase()),
+    ];
+
+    // Every query word must appear in at least one haystack token.
+    const allMatch = queryWords.every((w) =>
+      haystacks.some((h) => h.includes(w))
+    );
+    if (!allMatch) continue;
+
+    // Confidence: best match quality — exact token > startsWith > substring.
+    let score = 0.5;
+    for (const h of haystacks) {
+      if (h === q) {
+        score = 1.0;
+        break;
+      }
+      if (h.startsWith(q)) score = Math.max(score, 0.85);
+      else if (h.includes(q)) score = Math.max(score, 0.7);
     }
 
-    if (best >= 0.3) {
-      results.push({ food, confidence: Math.round(best * 100) / 100 });
-    }
+    results.push({ food, confidence: Math.round(score * 100) / 100 });
   }
 
   results.sort((a, b) => b.confidence - a.confidence);

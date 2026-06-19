@@ -11,11 +11,6 @@ export default function Chat() {
           <Text className="text-lg font-bold text-foreground ml-3">
             CKD Assistant
           </Text>
-          <View className="ml-auto bg-primary/10 px-2.5 py-1 rounded-full">
-            <Text className="text-xs text-primary font-semibold">
-              RAG-powered
-            </Text>
-          </View>
         </View>
 
         <View className="flex-1 items-center justify-center bg-card rounded-xl border border-border p-8">

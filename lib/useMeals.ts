@@ -1,36 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "./api";
+import { fetchMeals as fetchMealsRepo, type FetchedMeal } from "./mealsRepo";
 import type { Meal } from "@/components/MealCard";
 
-type ApiMealItem = {
-  id: string;
-  food_name: string;
-  portion_g: number;
-  calories: number;
-  potassium_mg: number;
-  phosphorus_mg: number;
-  sodium_mg: number;
-  protein_g: number;
-  carbs_g: number;
-  fat_g: number;
-  confidence: number;
-};
-
-type ApiMeal = {
-  id: string;
-  method: string;
-  risk_level: string | null;
-  notes: string | null;
-  logged_at: string;
-  meal_items: ApiMealItem[];
-  total_calories: number;
-  total_potassium: number;
-  total_phosphorus: number;
-  total_sodium: number;
-  total_protein: number;
-};
-
-function normalize(m: ApiMeal): Meal {
+function normalize(m: FetchedMeal): Meal {
   return {
     id: m.id,
     method: m.method as Meal["method"],
@@ -63,7 +35,7 @@ export function useMeals() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.get<ApiMeal[]>("/logs/meals");
+      const data = await fetchMealsRepo();
       setMeals(data.map(normalize));
     } catch (e: any) {
       setError(e?.message || "Failed to load meals");
