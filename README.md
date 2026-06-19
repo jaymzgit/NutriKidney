@@ -10,13 +10,13 @@ NutriKidney helps CKD patients track meals, monitor nutrient intake against stag
 - **Camera scan** — photograph your meal, YOLO26-Nano detects and classifies food items on-device (no internet needed)
 - **Manual search** — fuzzy search a Malaysian food database with offline support
 - **Portion estimation** — bounding box area estimates portion size, adjustable before logging
-- **Review screen** — colored bounding box overlays on captured image, per-item nutrient breakdown, ±25g portion adjustment
+- **Review screen** — colored bounding box overlays on captured image, per-item nutrient breakdown, ±5g portion adjustment
 
 ### CKD Nutrient Monitoring
 - **Stage-specific limits** — daily nutrient targets based on CKD stage 1–5 (KDOQI guidelines)
 - **Dashboard** — calorie gauge, potassium/phosphorus/sodium/protein progress bars
 - **Risk alerts** — safe/caution/danger classification with swap suggestions (e.g., "Replace anchovies with chicken breast")
-- **Meal history** — grouped by date, daily nutrient totals, expandable meal cards
+- **Meal history** — grouped by date, daily nutrient totals, expandable meal cards with photo thumbnail, delete with confirmation, pull-to-refresh
 
 ### User Management
 - **4-step registration** — account, demographics, health profile (CKD stage, comorbidities), lifestyle
@@ -24,7 +24,7 @@ NutriKidney helps CKD patients track meals, monitor nutrient intake against stag
 - **Auth** — email/password + Google OAuth via Supabase
 
 ### Food Database
-- 50+ Malaysian foods with CKD-relevant nutrients (potassium, phosphorus, sodium, protein, calories, carbs, fat)
+- 17 Malaysian foods with CKD-relevant nutrients (potassium, phosphorus, sodium, protein, calories, carbs, fat), values sourced from MyFCD
 - Portion-specific values with linear scaling
 - Fuzzy matching via Levenshtein similarity (name + aliases)
 
@@ -156,9 +156,9 @@ NutriKidney uses YOLO26-Nano (Ultralytics, Jan 2026) for on-device food detectio
 ### How it works
 
 1. Camera captures photo
-2. Image resized to 640x640, converted to NCHW Float32 tensor
+2. Image resized to 640x640, converted to NHWC Float32 tensor (R,G,B interleaved per pixel)
 3. YOLO26-Nano TFLite inference runs on-device
-4. Post-processing: confidence threshold (0.25) + Non-Maximum Suppression (IoU 0.45)
+4. Post-processing: confidence threshold (0.2) + Non-Maximum Suppression (IoU 0.3)
 5. Each detection matched to food database via Levenshtein similarity
 6. Bounding box area estimates portion size (clamped 0.5x–2.0x of default portion)
 7. All 7 nutrients scale linearly with estimated portion

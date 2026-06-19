@@ -360,7 +360,7 @@ End-to-end: Camera → YOLO26 → Food DB match → Portion estimation → Revie
 - **Frontend**: imported directly in `lib/foodDb.ts` (bundled into JS at build time)
 - **Backend**: loaded by `routers/food.py` at startup
 
-Each entry: `{ name, class_label, aliases[], portion_g, calories, potassium_mg, phosphorus_mg, sodium_mg, protein_g, carbs_g, fat_g }`. Nutrient values are per `portion_g` grams. `class_label` maps to YOLO detection classes.
+17 entries, nutrient values sourced from MyFCD (Malaysian Food Composition Database). Each entry: `{ name, class_label, aliases[], portion_g, calories, potassium_mg, phosphorus_mg, sodium_mg, protein_g, carbs_g, fat_g, source }`. Nutrient values are per `portion_g` grams. `class_label` maps to YOLO detection classes.
 
 ### CKD nutrient limits
 
@@ -422,7 +422,7 @@ All health/lifestyle data stored as `user_metadata` on the Supabase auth user.
 - CORS in `backend/main.py` is wide open (`allow_origins=["*"]`) — fine for dev, must be tightened before deploy.
 - `tsconfig.json` intentionally omits `baseUrl` (deprecated in TS 7); `paths` resolve relative to the tsconfig directory.
 - `food_db.json` is shared between frontend (bundled at build time) and backend (loaded at runtime). Changes require both a Metro restart and backend restart to take effect.
-- `CLASS_NAMES` in `lib/yolo.ts` must match the exact order from the trained model. Mismatch = wrong food labels on detections.
+- `CLASS_NAMES` in `lib/yolo.ts` (17 classes): Anchovies, Boiled-Egg, Char-Kuey-Teow, Chicken-Rendang, Curry-Puff, Fried-Chicken, Fried-Egg, Fried-Rice, Hokkien-Mee, Lo-Mein, Mee-Rebus, Mee-Siam, Peanuts, Rice, Roti-Canai, Sambal, Slices-Cucumber. Must match exact training class order — mismatch = wrong food labels.
 - `ScrollPicker` in profile is tap-to-unlock — prevents accidental value changes when scrolling the page.
 
 ## Not yet implemented
