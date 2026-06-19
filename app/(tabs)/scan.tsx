@@ -33,6 +33,7 @@ import Button from "@/components/Button";
 import { detectFood, isModelLoaded } from "@/lib/yolo";
 import { matchFood, scaleFood, searchFoods } from "@/lib/foodDb";
 import { createMeal } from "@/lib/mealsRepo";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 /* ── Types ──────────────────────────────────────────── */
 
@@ -386,7 +387,7 @@ export default function ScanMeal() {
     if (cart.length === 0) return;
     setSubmitting(true);
     try {
-      await createMeal({
+      const mealId = await createMeal({
         method: active,
         items: cart.map((c) => ({
           food_name: c.name,
@@ -401,6 +402,9 @@ export default function ScanMeal() {
           confidence: c.confidence,
         })),
       });
+      if (scanImageUri) {
+        AsyncStorage.setItem(`meal_photo_${mealId}`, scanImageUri).catch(() => {});
+      }
       setCart([]);
       setShowReview(false);
       setScanImageUri(null);
@@ -649,7 +653,7 @@ export default function ScanMeal() {
               {/* Portion adjustment */}
               <View className="flex-row items-center justify-center bg-muted/50 rounded-xl py-2 mb-3">
                 <Pressable
-                  onPress={() => adjustPortion(item.id, -25)}
+                  onPress={() => adjustPortion(item.id, -5)}
                   className="h-9 w-9 bg-card rounded-lg items-center justify-center border border-border"
                 >
                   <Minus size={14} color="#6B7280" />
@@ -658,7 +662,7 @@ export default function ScanMeal() {
                   {Math.round(item.portion_g)}g
                 </Text>
                 <Pressable
-                  onPress={() => adjustPortion(item.id, 25)}
+                  onPress={() => adjustPortion(item.id, 5)}
                   className="h-9 w-9 bg-card rounded-lg items-center justify-center border border-border"
                 >
                   <Plus size={14} color="#6B7280" />
@@ -920,7 +924,7 @@ export default function ScanMeal() {
                 <View className="flex-row items-center justify-between">
                   <View className="flex-row items-center">
                     <Pressable
-                      onPress={() => adjustPortion(item.id, -25)}
+                      onPress={() => adjustPortion(item.id, -5)}
                       className="h-8 w-8 bg-muted rounded-lg items-center justify-center"
                     >
                       <Minus size={14} color="#6B7280" />
@@ -929,7 +933,7 @@ export default function ScanMeal() {
                       {Math.round(item.portion_g)}g
                     </Text>
                     <Pressable
-                      onPress={() => adjustPortion(item.id, 25)}
+                      onPress={() => adjustPortion(item.id, 5)}
                       className="h-8 w-8 bg-muted rounded-lg items-center justify-center"
                     >
                       <Plus size={14} color="#6B7280" />

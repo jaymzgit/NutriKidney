@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
-import { ActivityIndicator, ScrollView, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Alert, RefreshControl, ScrollView, Text, View } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Calendar, Utensils } from "lucide-react-native";
 import MealHistoryItem from "@/components/MealHistoryItem";
@@ -8,6 +9,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { getLimitsForStage } from "@/lib/ckdLimits";
 import { NUTRIENT_COLORS, type NutrientKey } from "@/components/NutrientProgressBar";
 import { useMeals } from "@/lib/useMeals";
+import { deleteMeal } from "@/lib/mealsRepo";
 
 type DayTotals = {
   calories: number;
@@ -39,8 +41,39 @@ const nutrientInfo: { key: NutrientKey; limitKey: keyof DayTotals; label: string
 
 export default function MealHistory() {
   const { user } = useAuth();
-  const { meals, loading } = useMeals();
+  const { meals, loading, refetch } = useMeals();
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [photoUris, setPhotoUris] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!meals.length) return;
+    const keys = meals.map((m) => `meal_photo_${m.id}`);
+    AsyncStorage.multiGet(keys).then((pairs) => {
+      const map: Record<string, string> = {};
+      pairs.forEach(([key, val]) => {
+        if (val) map[key.replace("meal_photo_", "")] = val;
+      });
+      setPhotoUris(map);
+    });
+  }, [meals]);
+
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refetch();
+    setRefreshing(false);
+  }, [refetch]);
+
+  const handleDelete = useCallback(async (mealId: string) => {
+    try {
+      await deleteMeal(mealId);
+      AsyncStorage.removeItem(`meal_photo_${mealId}`).catch(() => {});
+      setExpandedId(null);
+      refetch();
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Failed to delete meal");
+    }
+  }, [refetch]);
 
   const ckdStage = user?.ckd_stage ?? null;
   const weightKg = user?.weight_kg ?? null;
@@ -89,7 +122,13 @@ export default function MealHistory() {
 
   return (
     <SafeAreaView className="flex-1 bg-background" edges={["top"]}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 24 }} className="px-4 pt-2">
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 24 }}
+        className="px-4 pt-2"
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#1A7A55" colors={["#1A7A55"]} />
+        }
+      >
         <View className="flex-row items-center mb-6">
           <Calendar size={20} color="#1A7A55" />
           <Text className="text-lg font-bold text-foreground ml-3">
@@ -199,6 +238,8 @@ export default function MealHistory() {
                         meal={meal}
                         isExpanded={expandedId === meal.id}
                         onToggle={() => toggle(meal.id)}
+                        photoUrl={photoUris[meal.id]}
+                        onDelete={() => handleDelete(meal.id)}
                       />
                     </View>
                   ))}

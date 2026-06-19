@@ -1,9 +1,10 @@
-import { Image, Pressable, Text, View } from "react-native";
+import { Alert, Image, Pressable, Text, View } from "react-native";
 import {
   Camera,
   ChevronDown,
   ChevronUp,
   Pencil,
+  Trash2,
 } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
 import type { Meal } from "./MealCard";
@@ -31,10 +32,14 @@ export default function MealHistoryItem({
   meal,
   isExpanded,
   onToggle,
+  photoUrl,
+  onDelete,
 }: {
   meal: Meal;
   isExpanded: boolean;
   onToggle: () => void;
+  photoUrl?: string;
+  onDelete?: () => void;
 }) {
   const Icon = methodIcons[meal.method || ""] || Pencil;
   const dot = riskDot[meal.risk_level || ""] || "bg-primary";
@@ -72,6 +77,12 @@ export default function MealHistoryItem({
           <Text className="text-xs text-muted-foreground">{mealTime}</Text>
         </View>
         <View className="flex-row items-center gap-2">
+          {photoUrl ? (
+            <Image
+              source={{ uri: photoUrl }}
+              style={{ width: 32, height: 32, borderRadius: 6 }}
+            />
+          ) : null}
           <Text className="text-xs font-bold text-foreground mr-1">
             {Math.round(totalCal)} kcal
           </Text>
@@ -85,10 +96,10 @@ export default function MealHistoryItem({
 
       {isExpanded ? (
         <View className="px-4 pb-4 border-t border-border bg-muted/20">
-          {meal.photo_url ? (
+          {(photoUrl || meal.photo_url) ? (
             <Image
-              source={{ uri: meal.photo_url }}
-              className="w-full h-48 rounded-xl mt-4 mb-4"
+              source={{ uri: (photoUrl || meal.photo_url)! }}
+              style={{ width: "100%", height: 192, borderRadius: 12, marginTop: 16, marginBottom: 16 }}
               resizeMode="cover"
             />
           ) : null}
@@ -151,6 +162,27 @@ export default function MealHistoryItem({
             <Text className="mt-3 text-xs text-muted-foreground italic">
               {meal.notes}
             </Text>
+          ) : null}
+
+          {onDelete ? (
+            <Pressable
+              onPress={() =>
+                Alert.alert(
+                  "Delete Meal",
+                  "Remove this meal log? This cannot be undone.",
+                  [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Delete", style: "destructive", onPress: onDelete },
+                  ]
+                )
+              }
+              className="flex-row items-center justify-center mt-4 py-2.5 rounded-xl border border-destructive/40 active:bg-destructive/10"
+            >
+              <Trash2 size={14} color="#DC2626" />
+              <Text className="text-xs font-semibold text-destructive ml-2">
+                Delete Meal
+              </Text>
+            </Pressable>
           ) : null}
         </View>
       ) : null}

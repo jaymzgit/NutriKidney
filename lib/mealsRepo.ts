@@ -108,6 +108,25 @@ export async function createMeal(input: CreateMealInput): Promise<string> {
   return meal_id;
 }
 
+export async function deleteMeal(meal_id: string): Promise<void> {
+  const { data: userData, error: userErr } = await supabase.auth.getUser();
+  if (userErr || !userData.user) throw new Error("Not signed in");
+  const user_id = userData.user.id;
+
+  // Verify ownership before delete
+  const { data: check } = await supabase
+    .from("meal_logs")
+    .select("id")
+    .eq("id", meal_id)
+    .eq("user_id", user_id)
+    .single();
+  if (!check) throw new Error("Meal not found");
+
+  await supabase.from("meal_items").delete().eq("meal_id", meal_id);
+  const { error } = await supabase.from("meal_logs").delete().eq("id", meal_id);
+  if (error) throw new Error(error.message);
+}
+
 export async function fetchMeals(): Promise<FetchedMeal[]> {
   const { data: userData, error: userErr } = await supabase.auth.getUser();
   if (userErr || !userData.user) throw new Error("Not signed in");

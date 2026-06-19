@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { getLimitsForStage } from "@/lib/ckdLimits";
-import { dummyMeals } from "@/lib/dummyData";
+import { useMeals } from "@/lib/useMeals";
 import type { NutrientAlertData } from "@/components/NutrientAlert";
 
 export function useNutrientAlerts() {
@@ -9,13 +9,14 @@ export function useNutrientAlerts() {
   const ckdStage = user?.ckd_stage ?? null;
   const weightKg = user?.weight_kg ?? null;
   const limits = getLimitsForStage(ckdStage, weightKg);
+  const { meals } = useMeals();
 
   const todayMeals = useMemo(() => {
     const today = new Date().toDateString();
-    return dummyMeals.filter(
+    return meals.filter(
       (m) => new Date(m.logged_at).toDateString() === today
     );
-  }, []);
+  }, [meals]);
 
   const totals = useMemo(() => {
     return todayMeals.reduce(

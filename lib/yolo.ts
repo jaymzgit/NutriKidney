@@ -83,6 +83,9 @@ export async function loadModel(): Promise<void> {
     require("@/assets/models/food_detect.tflite"),
     []
   );
+  const m = _model as any;
+  if (m.inputs) console.log("[YOLO] input shape:", JSON.stringify(m.inputs));
+  if (m.outputs) console.log("[YOLO] output shape:", JSON.stringify(m.outputs));
 }
 
 export function isModelLoaded(): boolean {
@@ -125,6 +128,10 @@ async function preprocessImage(uri: string): Promise<{
   const padX = Math.floor((MODEL_INPUT_SIZE - newW) / 2);
   const padY = Math.floor((MODEL_INPUT_SIZE - newH) / 2);
 
+  console.log(
+    `[YOLO] preprocess: orig=${origWidth}x${origHeight} scale=${scale.toFixed(4)} newWH=${newW}x${newH} pad=${padX},${padY}`
+  );
+
   // Resize keeping aspect ratio
   const resized = await ImageManipulator.manipulateAsync(
     uri,
@@ -137,22 +144,23 @@ async function preprocessImage(uri: string): Promise<{
   const bytes = new Uint8Array(arrayBuffer);
   const { data } = decodeJpeg(bytes, { useTArray: true, formatAsRGBA: true });
 
-  // Build NCHW float32 padded canvas (gray 114/255 like Ultralytics default).
+  // Build NHWC float32 padded canvas (gray 114/255 like Ultralytics default).
+  // TFLite uses NHWC: pixels are interleaved [R,G,B, R,G,B, ...] row by row.
   const pixels = MODEL_INPUT_SIZE * MODEL_INPUT_SIZE;
   const input = new Float32Array(3 * pixels);
   const PAD_VAL = 114 / 255;
   input.fill(PAD_VAL);
 
-  // Copy resized pixels into padded canvas
+  // Copy resized pixels into padded canvas (NHWC: 3 floats per pixel)
   for (let y = 0; y < newH; y++) {
     for (let x = 0; x < newW; x++) {
-      const src = (y * newW + x) * 4;
+      const src = (y * newW + x) * 4;         // RGBA source
       const dstX = padX + x;
       const dstY = padY + y;
-      const idx = dstY * MODEL_INPUT_SIZE + dstX;
-      input[idx] = data[src] / 255;
-      input[pixels + idx] = data[src + 1] / 255;
-      input[2 * pixels + idx] = data[src + 2] / 255;
+      const idx = (dstY * MODEL_INPUT_SIZE + dstX) * 3; // NHWC destination
+      input[idx]     = data[src]     / 255;   // R
+      input[idx + 1] = data[src + 1] / 255;   // G
+      input[idx + 2] = data[src + 2] / 255;   // B
     }
   }
 
@@ -210,6 +218,9 @@ function postProcess(
 
   const detections: Detection[] = [];
 
+  // Log raw values of first passing detection to verify coordinate format
+  let firstLogDone = false;
+
   for (let i = 0; i < numDetections; i++) {
     const base = i * STRIDE;
     const score = output[base + 4];
@@ -218,12 +229,19 @@ function postProcess(
     const classIdx = Math.round(output[base + 5]);
     if (classIdx < 0 || classIdx >= numClasses) continue;
 
-    // TFLite Object Detection convention: [y1, x1, y2, x2] normalized.
-    // Norm [0,1] → pixels of 640 padded canvas
-    const y1p = output[base + 0] * MODEL_INPUT_SIZE;
-    const x1p = output[base + 1] * MODEL_INPUT_SIZE;
-    const y2p = output[base + 2] * MODEL_INPUT_SIZE;
-    const x2p = output[base + 3] * MODEL_INPUT_SIZE;
+    if (!firstLogDone) {
+      console.log(
+        `[YOLO] raw output[0..5] for first det: [${output[base].toFixed(4)}, ${output[base+1].toFixed(4)}, ${output[base+2].toFixed(4)}, ${output[base+3].toFixed(4)}, ${score.toFixed(4)}, ${output[base+5].toFixed(1)}] class=${CLASS_NAMES[classIdx]}`
+      );
+      firstLogDone = true;
+    }
+
+    // Ultralytics YOLO TFLite NMS output: [x1, y1, x2, y2, score, class_idx]
+    // Coords normalized [0,1] relative to 640×640 padded canvas.
+    const x1p = output[base + 0] * MODEL_INPUT_SIZE;
+    const y1p = output[base + 1] * MODEL_INPUT_SIZE;
+    const x2p = output[base + 2] * MODEL_INPUT_SIZE;
+    const y2p = output[base + 3] * MODEL_INPUT_SIZE;
 
     // Reverse letterbox: subtract pad, divide by scale
     const x1 = (x1p - padX) / scale;
@@ -274,12 +292,13 @@ function postProcess(
   console.log(
     `[YOLO] kept=${kept.length} (raw=${detections.length}, after-dedupe=${deduped.length})`
   );
-  if (kept[0]) {
-    const b = kept[0];
+  kept.forEach((b) => {
+    const cx = ((b.x + b.width / 2) / origWidth * 100).toFixed(1);
+    const cy = ((b.y + b.height / 2) / origHeight * 100).toFixed(1);
     console.log(
-      `[YOLO] first bbox: ${b.className} x=${b.x.toFixed(0)} y=${b.y.toFixed(0)} w=${b.width.toFixed(0)} h=${b.height.toFixed(0)} (img ${origWidth}x${origHeight})`
+      `[YOLO] det: ${b.className} conf=${b.confidence} center=(${cx}%,${cy}%) px=(${b.x.toFixed(0)},${b.y.toFixed(0)},${b.width.toFixed(0)},${b.height.toFixed(0)}) img=${origWidth}x${origHeight}`
     );
-  }
+  });
   return kept.slice(0, MAX_DETECTIONS);
 }
 
