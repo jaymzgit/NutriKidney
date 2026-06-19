@@ -111,24 +111,29 @@ export function scaleFood(food: FoodEntry, targetPortion: number): FoodEntry {
 /** Fuzzy search the food database (for manual search mode). */
 export function searchFoods(
   query: string,
-  limit = 5
+  limit = 10
 ): Array<{ food: FoodEntry; confidence: number }> {
   if (query.trim().length < 2) return [];
   const q = query.toLowerCase().trim();
 
   const results: Array<{ food: FoodEntry; confidence: number }> = [];
 
-  for (const food of db) {
-    let best = similarity(q, food.name.toLowerCase());
+  const scoreToken = (token: string): number => {
+    const t = token.toLowerCase();
+    if (!t) return 0;
+    let s = similarity(q, t);
+    if (t.includes(q) || q.includes(t)) s = Math.min(s + 0.4, 1.0);
+    return s;
+  };
 
+  for (const food of db) {
+    let best = scoreToken(food.name);
+    best = Math.max(best, scoreToken(food.class_label.replace(/[_-]/g, " ")));
     for (const alias of food.aliases ?? []) {
-      const al = alias.toLowerCase();
-      const sim = similarity(q, al);
-      const bonus = q.includes(al) || al.includes(q) ? 0.2 : 0;
-      best = Math.max(best, Math.min(sim + bonus, 1.0));
+      best = Math.max(best, scoreToken(alias));
     }
 
-    if (best >= 0.35) {
+    if (best >= 0.3) {
       results.push({ food, confidence: Math.round(best * 100) / 100 });
     }
   }

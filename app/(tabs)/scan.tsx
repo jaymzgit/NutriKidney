@@ -137,8 +137,14 @@ export default function ScanMeal() {
   // Load YOLO model on mount
   useEffect(() => {
     loadModel()
-      .then(() => setModelReady(true))
-      .catch(() => setModelReady(false));
+      .then(() => {
+        console.log("[YOLO] Model loaded OK");
+        setModelReady(true);
+      })
+      .catch((err) => {
+        console.log("[YOLO] Model load FAILED:", err?.message ?? err);
+        setModelReady(false);
+      });
   }, []);
 
   // Auto-close review when cart empties

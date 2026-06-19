@@ -18,6 +18,7 @@
 
 import { Image } from "react-native";
 import * as ImageManipulator from "expo-image-manipulator";
+import { Asset } from "expo-asset";
 import { decode as decodeJpeg } from "jpeg-js";
 
 // ── Configuration ───────────────────────────────────
@@ -74,9 +75,16 @@ export async function loadModel(): Promise<void> {
   if (_model) return;
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { loadTensorflowModel } = require("react-native-fast-tflite");
-  _model = await loadTensorflowModel(
+
+  // Resolve asset to a concrete file URI (Metro dev returns http URL; APK returns file://).
+  // fast-tflite v3 native side requires {url} object — passing raw require() id fails on Android.
+  const asset = Asset.fromModule(
     require("@/assets/models/food_detect.tflite")
   );
+  await asset.downloadAsync();
+  const url = asset.localUri ?? asset.uri;
+
+  _model = await loadTensorflowModel({ url });
 }
 
 export function isModelLoaded(): boolean {
