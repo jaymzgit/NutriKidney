@@ -140,7 +140,7 @@ app/                          # Expo Router screens (file-based routing)
     _layout.tsx               # Bottom tab navigator (5 visible + 1 hidden)
     index.tsx                 # Dashboard — calorie gauge, nutrient progress bars, today's meals
     scan.tsx                  # Meal logging — Scan (camera + YOLO) and Manual (search) modes
-    history.tsx               # Meal history grouped by date, daily totals, expandable cards
+    history.tsx               # Meal history grouped by date, daily totals, expandable cards, pull-to-refresh
     lab-reports.tsx            # Lab report upload (Phase 3 placeholder)
     chat.tsx                  # CKD AI assistant (placeholder, disabled)
     profile.tsx               # User profile, CKD stage, health flags, weight chart
@@ -153,9 +153,10 @@ lib/                          # Shared utilities (imported via @/lib/*)
   foodDb.ts                   # Local food database — fuzzy matching + nutrient scaling
   ckdLimits.ts                # CKD nutrient limits engine (KDOQI guidelines)
   useMeals.ts                 # Hook: fetches /logs/meals, returns { meals, loading, refetch }
-  useNutrientAlerts.ts        # Hook: compares daily totals to CKD limits, returns alerts
+  useNutrientAlerts.ts        # Hook: compares today's real meals to CKD limits, returns alerts
+  mealsRepo.ts                # Direct Supabase client for meal CRUD (createMeal, deleteMeal)
   riskEngine.js               # getRiskLevel() — safe/caution/danger based on % of limits
-  dummyData.ts                # Test meal data (50+ dummy meals for UI development)
+  dummyData.ts                # Test meal data (dummy meals for UI development)
 
 components/                   # Reusable UI components
   AuthLayout.tsx              # Auth screen template (icon, title, form area, footer)
@@ -165,7 +166,7 @@ components/                   # Reusable UI components
   NutrientProgressBar.tsx     # Color-coded progress bar per nutrient (K/P/Na/protein)
   NutrientAlert.tsx           # Red alert card (excess amount, offending food, swap suggestion)
   MealCard.tsx                # Compact meal summary (time, method icon, items, risk badge)
-  MealHistoryItem.tsx         # Expandable meal row (toggles nutrient bars + food table)
+  MealHistoryItem.tsx         # Expandable meal row (nutrient breakdown, photo thumbnail, delete)
   NumberStepper.tsx            # +/− increment with long-press repeat (weight entry)
   GoogleIcon.tsx              # Google brand SVG logo
 
@@ -178,7 +179,7 @@ backend/                      # FastAPI service
     scan.py                   # POST /scan/detect — Roboflow API fallback for image detection
     ocr.py                    # POST /ocr/extract — Phase 3 placeholder
   data/
-    food_db.json              # Malaysian food database (50+ entries with CKD-relevant nutrients)
+    food_db.json              # Malaysian food database (17 entries, MyFCD-sourced nutrients)
 
 assets/
   models/
@@ -325,11 +326,11 @@ End-to-end: Camera → YOLO26 → Food DB match → Portion estimation → Revie
 
 2. **Image capture** (`app/(tabs)/scan.tsx`): CameraView or ImagePicker captures photo. URI passed to `detectFood()`.
 
-3. **Preprocessing** (`lib/yolo.ts` → `preprocessImage`): Resize to 640×640 via expo-image-manipulator → fetch URI as ArrayBuffer → decode JPEG via `jpeg-js` → convert to NCHW Float32Array normalized [0,1].
+3. **Preprocessing** (`lib/yolo.ts` → `preprocessImage`): Resize to 640×640 via expo-image-manipulator → fetch URI as ArrayBuffer → decode JPEG via `jpeg-js` → convert to NHWC Float32Array normalized [0,1] (R,G,B interleaved per pixel).
 
-4. **Inference** (`lib/yolo.ts` → `detectFood`): Runs TFLite model synchronously via `model.runSync()`. Output tensor shape: `[1, 4+numClasses, numDetections]` (Ultralytics convention — no objectness score, class scores are direct confidences).
+4. **Inference** (`lib/yolo.ts` → `detectFood`): Runs TFLite model synchronously via `model.runSync()`. Output tensor shape: `[1, max_dets, 6]` — NMS output format `[x1, y1, x2, y2, score, class_idx]`, coordinates normalized to [0,1].
 
-5. **Post-processing** (`lib/yolo.ts` → `postProcess`): Iterates detections, finds max class score per anchor, applies confidence threshold (0.25), maps coordinates from 640×640 model space to original image dimensions, runs Non-Maximum Suppression (IoU threshold 0.45). `CLASS_NAMES` array (15 Malaysian foods, alphabetical) must match model's training class order.
+5. **Post-processing** (`lib/yolo.ts` → `postProcess`): Iterates detections, applies confidence threshold (0.2), maps coordinates from normalized [0,1] space to original image dimensions, runs Non-Maximum Suppression (IoU threshold 0.3). `CLASS_NAMES` array (17 Malaysian foods, alphabetical) must match model's training class order.
 
 6. **Food DB cross-reference** (`lib/foodDb.ts` → `matchFood`): Each detection's `className` is matched against `food_db.json` via Levenshtein similarity. Exact match on `class_label` or name → confidence 1.0. Fuzzy match on aliases with substring bonus. Threshold 0.4.
 
@@ -343,9 +344,9 @@ End-to-end: Camera → YOLO26 → Food DB match → Portion estimation → Revie
 
 8. **Nutrient scaling** (`lib/foodDb.ts` → `scaleFood`): All 7 nutrients (calories, K, P, Na, protein, carbs, fat) scale linearly: `scaled = base × (estimatedPortion / food.portion_g)`.
 
-9. **Review screen** (`app/(tabs)/scan.tsx`): Shows captured image with colored bounding box overlays (absolutely-positioned Views). Per-item cards show portion ±25g adjustment, 7-nutrient grid. User can add/remove items before logging.
+9. **Review screen** (`app/(tabs)/scan.tsx`): Shows captured image with colored bounding box overlays (absolutely-positioned Views). Per-item cards show portion ±5g adjustment, 7-nutrient grid. User can add/remove items before logging.
 
-10. **Logging**: Cart submitted via `api.post("/logs/meals", ...)` → backend writes to Supabase `meal_logs` + `meal_items` tables.
+10. **Logging**: Cart submitted via `createMeal()` in `lib/mealsRepo.ts` (direct Supabase client, bypasses FastAPI). Scan photo URI persisted to AsyncStorage keyed by `meal_photo_${mealId}`.
 
 **API fallback**: If TFLite model not loaded, scan falls back to `POST /scan/detect` (Roboflow serverless inference via `backend/routers/scan.py`). Shown as amber warning in UI.
 
@@ -400,7 +401,7 @@ print(YOLO("best.pt").names)
 ### Dashboard and history
 
 - `app/(tabs)/index.tsx` — fetches meals via `useMeals()`, aggregates today's nutrient totals, renders calorie circle gauge (SVG), 4 nutrient progress bars (K/P/Na/protein via `NutrientProgressBar`), today's meal cards, and alert badges. Risk level from `getRiskLevel()` (safe/caution/danger based on % of CKD limits).
-- `app/(tabs)/history.tsx` — groups meals by date (Today/Yesterday/date strings), shows daily totals card per group, expandable `MealHistoryItem` cards with full nutrient breakdown.
+- `app/(tabs)/history.tsx` — groups meals by date (Today/Yesterday/date strings), shows daily totals card per group, expandable `MealHistoryItem` cards with full nutrient breakdown, meal photo thumbnail (loaded from AsyncStorage), delete with confirmation, pull-to-refresh.
 - `app/alerts.tsx` — standalone page listing exceeded limits with swap suggestions (e.g., "Replace anchovies with chicken breast"). Accessible from dashboard alert badge.
 
 ### Registration flow
