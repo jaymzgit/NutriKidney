@@ -5,6 +5,7 @@ import {
   ChevronUp,
   Pencil,
   Trash2,
+  Utensils,
 } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
 import type { Meal } from "./MealCard";
@@ -19,6 +20,12 @@ const riskDot: Record<string, string> = {
   safe: "bg-primary",
   caution: "bg-[#E6A817]",
   danger: "bg-destructive",
+};
+
+const riskBadge: Record<string, { bg: string; text: string; label: string }> = {
+  safe: { bg: "bg-primary/10", text: "text-primary", label: "Safe" },
+  caution: { bg: "bg-[#E6A817]/15", text: "text-[#E6A817]", label: "Caution" },
+  danger: { bg: "bg-destructive/10", text: "text-destructive", label: "Danger" },
 };
 
 const nutrientRows: { key: "potassium" | "phosphorus" | "sodium" | "protein"; label: string; unit: string }[] = [
@@ -43,6 +50,7 @@ export default function MealHistoryItem({
 }) {
   const Icon = methodIcons[meal.method || ""] || Pencil;
   const dot = riskDot[meal.risk_level || ""] || "bg-primary";
+  const badge = meal.risk_level ? riskBadge[meal.risk_level] : null;
 
   const mealTime = new Date(meal.logged_at).toLocaleTimeString("en-US", {
     hour: "numeric",
@@ -77,12 +85,26 @@ export default function MealHistoryItem({
           <Text className="text-xs text-muted-foreground">{mealTime}</Text>
         </View>
         <View className="flex-row items-center gap-2">
+          {badge ? (
+            <View className={`px-2 py-0.5 rounded-full ${badge.bg}`}>
+              <Text className={`text-[10px] font-bold ${badge.text}`}>
+                {badge.label}
+              </Text>
+            </View>
+          ) : null}
           {photoUrl ? (
             <Image
               source={{ uri: photoUrl }}
               style={{ width: 32, height: 32, borderRadius: 6 }}
             />
-          ) : null}
+          ) : (
+            <View
+              style={{ width: 32, height: 32, borderRadius: 6 }}
+              className="bg-muted items-center justify-center"
+            >
+              <Utensils size={14} color="#9CA3AF" />
+            </View>
+          )}
           <Text className="text-xs font-bold text-foreground mr-1">
             {Math.round(totalCal)} kcal
           </Text>

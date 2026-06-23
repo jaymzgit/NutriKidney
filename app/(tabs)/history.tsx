@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, RefreshControl, ScrollView, Text, View } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Calendar, Utensils } from "lucide-react-native";
 import MealHistoryItem from "@/components/MealHistoryItem";
@@ -43,19 +42,6 @@ export default function MealHistory() {
   const { user } = useAuth();
   const { meals, loading, refetch } = useMeals();
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [photoUris, setPhotoUris] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    if (!meals.length) return;
-    const keys = meals.map((m) => `meal_photo_${m.id}`);
-    AsyncStorage.multiGet(keys).then((pairs) => {
-      const map: Record<string, string> = {};
-      pairs.forEach(([key, val]) => {
-        if (val) map[key.replace("meal_photo_", "")] = val;
-      });
-      setPhotoUris(map);
-    });
-  }, [meals]);
 
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(async () => {
@@ -67,7 +53,6 @@ export default function MealHistory() {
   const handleDelete = useCallback(async (mealId: string) => {
     try {
       await deleteMeal(mealId);
-      AsyncStorage.removeItem(`meal_photo_${mealId}`).catch(() => {});
       setExpandedId(null);
       refetch();
     } catch (e: any) {
@@ -238,7 +223,7 @@ export default function MealHistory() {
                         meal={meal}
                         isExpanded={expandedId === meal.id}
                         onToggle={() => toggle(meal.id)}
-                        photoUrl={photoUris[meal.id]}
+                        photoUrl={meal.photo_url}
                         onDelete={() => handleDelete(meal.id)}
                       />
                     </View>

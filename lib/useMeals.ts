@@ -9,6 +9,7 @@ function normalize(m: FetchedMeal): Meal {
     risk_level: m.risk_level as Meal["risk_level"],
     notes: m.notes ?? undefined,
     logged_at: m.logged_at,
+    photo_url: m.photo_url ?? undefined,
     total_calories: m.total_calories,
     total_potassium: m.total_potassium,
     total_phosphorus: m.total_phosphorus,

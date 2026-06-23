@@ -33,7 +33,15 @@ import Button from "@/components/Button";
 import { detectFood, isModelLoaded } from "@/lib/yolo";
 import { matchFood, scaleFood, searchFoods } from "@/lib/foodDb";
 import { createMeal } from "@/lib/mealsRepo";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useAuth } from "@/lib/AuthContext";
+import { useMeals } from "@/lib/useMeals";
+import { getMealRiskLevel } from "@/lib/riskEngine";
+
+const RISK_BADGE: Record<string, { bg: string; text: string; label: string }> = {
+  safe: { bg: "bg-primary/15", text: "text-primary", label: "Safe" },
+  caution: { bg: "bg-[#E6A817]/15", text: "text-[#E6A817]", label: "Caution" },
+  danger: { bg: "bg-destructive/15", text: "text-destructive", label: "Danger" },
+};
 
 /* ── Types ──────────────────────────────────────────── */
 
@@ -62,7 +70,7 @@ type FoodResult = {
 };
 
 type BBox = { x: number; y: number; w: number; h: number };
-type CartItem = FoodResult & { id: string; bbox?: BBox };
+type CartItem = FoodResult & { id: string; quantity: number; bbox?: BBox };
 
 /* ── Constants ──────────────────────────────────────── */
 
@@ -112,6 +120,11 @@ export default function ScanMeal() {
   const [active, setActive] = useState<ModeKey>("scan");
   const current = modes.find((m) => m.key === active)!;
 
+  const { user } = useAuth();
+  const ckdStage = user?.ckd_stage ?? null;
+  const weightKg = user?.weight_kg ?? null;
+  const { meals } = useMeals();
+
   // Camera
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -160,11 +173,21 @@ export default function ScanMeal() {
   /* ── Cart helpers ──────────────────────────────────── */
 
   const addToCart = useCallback((item: FoodResult) => {
-    setCart((prev) => [...prev, { ...item, id: uid() }]);
+    setCart((prev) => [...prev, { ...item, id: uid(), quantity: 1 }]);
   }, []);
 
   const removeFromCart = useCallback((id: string) => {
     setCart((prev) => prev.filter((i) => i.id !== id));
+  }, []);
+
+  const adjustQuantity = useCallback((id: string, delta: number) => {
+    setCart((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? { ...item, quantity: Math.max(1, Math.min(20, item.quantity + delta)) }
+          : item
+      )
+    );
   }, []);
 
   const adjustPortion = useCallback((id: string, delta: number) => {
@@ -275,6 +298,7 @@ export default function ScanMeal() {
             const scaled = scaleFood(match.food, portion);
             return {
               id: uid(),
+              quantity: 1,
               name: scaled.name,
               portion_g: scaled.portion_g,
               calories: scaled.calories,
@@ -292,6 +316,7 @@ export default function ScanMeal() {
 
           return {
             id: uid(),
+            quantity: 1,
             name: det.className.replace(/-/g, " "),
             portion_g: Math.round(150 * portionScale),
             calories: 0,
@@ -325,6 +350,7 @@ export default function ScanMeal() {
         newItems = (data.items || []).map((item: FoodResult) => ({
           ...item,
           id: uid(),
+          quantity: 1,
         }));
       }
 
@@ -387,24 +413,36 @@ export default function ScanMeal() {
     if (cart.length === 0) return;
     setSubmitting(true);
     try {
+      const todayStr = new Date().toDateString();
+      const todayTotals = meals
+        .filter((m) => new Date(m.logged_at).toDateString() === todayStr)
+        .reduce(
+          (acc, m) => ({
+            potassium: acc.potassium + (m.total_potassium || 0),
+            phosphorus: acc.phosphorus + (m.total_phosphorus || 0),
+            sodium: acc.sodium + (m.total_sodium || 0),
+            protein: acc.protein + (m.total_protein || 0),
+          }),
+          { potassium: 0, phosphorus: 0, sodium: 0, protein: 0 }
+        );
+      const risk = getMealRiskLevel(cart, ckdStage, weightKg, todayTotals);
       const mealId = await createMeal({
         method: active,
+        risk_level: ckdStage ? (risk.level as "safe" | "caution" | "danger") : null,
+        photoUri: scanImageUri,
         items: cart.map((c) => ({
-          food_name: c.name,
-          portion_g: c.portion_g,
-          calories: c.calories,
-          potassium_mg: c.potassium_mg,
-          phosphorus_mg: c.phosphorus_mg,
-          sodium_mg: c.sodium_mg,
-          protein_g: c.protein_g,
-          carbs_g: c.carbs_g,
-          fat_g: c.fat_g,
+          food_name: c.quantity > 1 ? `${c.name} ×${c.quantity}` : c.name,
+          portion_g: c.portion_g * c.quantity,
+          calories: c.calories * c.quantity,
+          potassium_mg: c.potassium_mg * c.quantity,
+          phosphorus_mg: c.phosphorus_mg * c.quantity,
+          sodium_mg: c.sodium_mg * c.quantity,
+          protein_g: c.protein_g * c.quantity,
+          carbs_g: c.carbs_g * c.quantity,
+          fat_g: c.fat_g * c.quantity,
           confidence: c.confidence,
         })),
       });
-      if (scanImageUri) {
-        AsyncStorage.setItem(`meal_photo_${mealId}`, scanImageUri).catch(() => {});
-      }
       setCart([]);
       setShowReview(false);
       setScanImageUri(null);
@@ -418,7 +456,7 @@ export default function ScanMeal() {
     } finally {
       setSubmitting(false);
     }
-  }, [cart, active, router]);
+  }, [cart, active, router, meals, ckdStage, weightKg, scanImageUri]);
 
   /* ── Full-screen camera overlay ───────────────────── */
 
@@ -507,11 +545,32 @@ export default function ScanMeal() {
         ? displayW * (scanImageSize.h / scanImageSize.w)
         : displayW * 0.75;
 
-    const totalCal = cart.reduce((a, c) => a + c.calories, 0);
-    const totalK = cart.reduce((a, c) => a + c.potassium_mg, 0);
-    const totalP = cart.reduce((a, c) => a + c.phosphorus_mg, 0);
-    const totalNa = cart.reduce((a, c) => a + c.sodium_mg, 0);
-    const totalPro = cart.reduce((a, c) => a + c.protein_g, 0);
+    const totalCal = cart.reduce((a, c) => a + c.calories * c.quantity, 0);
+    const totalK = cart.reduce((a, c) => a + c.potassium_mg * c.quantity, 0);
+    const totalP = cart.reduce((a, c) => a + c.phosphorus_mg * c.quantity, 0);
+    const totalNa = cart.reduce((a, c) => a + c.sodium_mg * c.quantity, 0);
+    const totalPro = cart.reduce((a, c) => a + c.protein_g * c.quantity, 0);
+
+    const todayStr = new Date().toDateString();
+    const todayTotals = meals
+      .filter((m) => new Date(m.logged_at).toDateString() === todayStr)
+      .reduce(
+        (acc, m) => ({
+          potassium: acc.potassium + (m.total_potassium || 0),
+          phosphorus: acc.phosphorus + (m.total_phosphorus || 0),
+          sodium: acc.sodium + (m.total_sodium || 0),
+          protein: acc.protein + (m.total_protein || 0),
+        }),
+        { potassium: 0, phosphorus: 0, sodium: 0, protein: 0 }
+      );
+    const scaledCart = cart.map((c) => ({
+      potassium_mg: c.potassium_mg * c.quantity,
+      phosphorus_mg: c.phosphorus_mg * c.quantity,
+      sodium_mg: c.sodium_mg * c.quantity,
+      protein_g: c.protein_g * c.quantity,
+    }));
+    const mealRisk = getMealRiskLevel(scaledCart, ckdStage, weightKg, todayTotals);
+    const riskBadge = RISK_BADGE[mealRisk.level] || RISK_BADGE.safe;
 
     return (
       <SafeAreaView className="flex-1 bg-background" edges={["top"]}>
@@ -539,9 +598,18 @@ export default function ScanMeal() {
             <Text className="text-lg font-bold text-foreground">
               Review Your Meal
             </Text>
+            {ckdStage ? (
+              <View
+                className={`ml-auto px-2.5 py-1 rounded-full ${riskBadge.bg}`}
+              >
+                <Text className={`text-[11px] font-bold ${riskBadge.text}`}>
+                  {riskBadge.label}
+                </Text>
+              </View>
+            ) : null}
             {scanSource && (
               <View
-                className={`ml-auto px-2 py-1 rounded-full ${
+                className={`${ckdStage ? "ml-2" : "ml-auto"} px-2 py-1 rounded-full ${
                   scanSource === "device" ? "bg-primary/15" : "bg-amber-100"
                 }`}
               >
@@ -650,35 +718,60 @@ export default function ScanMeal() {
                 </Pressable>
               </View>
 
-              {/* Portion adjustment */}
-              <View className="flex-row items-center justify-center bg-muted/50 rounded-xl py-2 mb-3">
-                <Pressable
-                  onPress={() => adjustPortion(item.id, -5)}
-                  className="h-9 w-9 bg-card rounded-lg items-center justify-center border border-border"
-                >
-                  <Minus size={14} color="#6B7280" />
-                </Pressable>
-                <Text className="text-base font-bold text-foreground mx-4 min-w-[60px] text-center">
-                  {Math.round(item.portion_g)}g
-                </Text>
-                <Pressable
-                  onPress={() => adjustPortion(item.id, 5)}
-                  className="h-9 w-9 bg-card rounded-lg items-center justify-center border border-border"
-                >
-                  <Plus size={14} color="#6B7280" />
-                </Pressable>
+              {/* Portion + quantity */}
+              <View className="flex-row gap-2 mb-3">
+                <View className="flex-1 flex-row items-center justify-center bg-muted/50 rounded-xl py-2">
+                  <Pressable
+                    onPress={() => adjustPortion(item.id, -5)}
+                    className="h-9 w-9 bg-card rounded-lg items-center justify-center border border-border"
+                  >
+                    <Minus size={14} color="#6B7280" />
+                  </Pressable>
+                  <View className="mx-3 min-w-[70px] items-center">
+                    <Text className="text-[9px] text-muted-foreground uppercase">Portion</Text>
+                    <Text className="text-base font-bold text-foreground">
+                      {Math.round(item.portion_g)}g
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={() => adjustPortion(item.id, 5)}
+                    className="h-9 w-9 bg-card rounded-lg items-center justify-center border border-border"
+                  >
+                    <Plus size={14} color="#6B7280" />
+                  </Pressable>
+                </View>
+                <View className="flex-row items-center justify-center bg-muted/50 rounded-xl py-2 px-2">
+                  <Pressable
+                    onPress={() => adjustQuantity(item.id, -1)}
+                    className="h-9 w-9 bg-card rounded-lg items-center justify-center border border-border"
+                  >
+                    <Minus size={14} color="#6B7280" />
+                  </Pressable>
+                  <View className="mx-2 min-w-[40px] items-center">
+                    <Text className="text-[9px] text-muted-foreground uppercase">Qty</Text>
+                    <Text className="text-base font-bold text-foreground">
+                      ×{item.quantity}
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={() => adjustQuantity(item.id, 1)}
+                    className="h-9 w-9 bg-card rounded-lg items-center justify-center border border-border"
+                  >
+                    <Plus size={14} color="#6B7280" />
+                  </Pressable>
+                </View>
               </View>
 
-              {/* Nutrient grid */}
+              {/* Nutrient grid (scaled by quantity) */}
               <View className="flex-row flex-wrap">
                 {[
-                  { label: "Calories", val: `${Math.round(item.calories)}`, u: "kcal" },
-                  { label: "Potassium", val: `${Math.round(item.potassium_mg)}`, u: "mg" },
-                  { label: "Phosphorus", val: `${Math.round(item.phosphorus_mg)}`, u: "mg" },
-                  { label: "Sodium", val: `${Math.round(item.sodium_mg)}`, u: "mg" },
-                  { label: "Protein", val: item.protein_g.toFixed(1), u: "g" },
-                  { label: "Carbs", val: item.carbs_g.toFixed(1), u: "g" },
-                  { label: "Fat", val: item.fat_g.toFixed(1), u: "g" },
+                  { label: "Calories", val: `${Math.round(item.calories * item.quantity)}`, u: "kcal" },
+                  { label: "Potassium", val: `${Math.round(item.potassium_mg * item.quantity)}`, u: "mg" },
+                  { label: "Phosphorus", val: `${Math.round(item.phosphorus_mg * item.quantity)}`, u: "mg" },
+                  { label: "Sodium", val: `${Math.round(item.sodium_mg * item.quantity)}`, u: "mg" },
+                  { label: "Protein", val: (item.protein_g * item.quantity).toFixed(1), u: "g" },
+                  { label: "Carbs", val: (item.carbs_g * item.quantity).toFixed(1), u: "g" },
+                  { label: "Fat", val: (item.fat_g * item.quantity).toFixed(1), u: "g" },
                 ].map((n) => (
                   <View key={n.label} className="w-1/3 mb-2">
                     <Text className="text-[10px] text-muted-foreground">
@@ -733,7 +826,7 @@ export default function ScanMeal() {
 
   /* ── Main render ──────────────────────────────────── */
 
-  const cartTotal = cart.reduce((a, c) => a + c.calories, 0);
+  const cartTotal = cart.reduce((a, c) => a + c.calories * c.quantity, 0);
 
   return (
     <SafeAreaView className="flex-1 bg-background" edges={["top"]}>
@@ -929,7 +1022,7 @@ export default function ScanMeal() {
                     >
                       <Minus size={14} color="#6B7280" />
                     </Pressable>
-                    <Text className="text-sm font-medium text-foreground mx-3 min-w-[50px] text-center">
+                    <Text className="text-sm font-medium text-foreground mx-2 min-w-[44px] text-center">
                       {Math.round(item.portion_g)}g
                     </Text>
                     <Pressable
@@ -939,8 +1032,25 @@ export default function ScanMeal() {
                       <Plus size={14} color="#6B7280" />
                     </Pressable>
                   </View>
+                  <View className="flex-row items-center">
+                    <Pressable
+                      onPress={() => adjustQuantity(item.id, -1)}
+                      className="h-8 w-8 bg-muted rounded-lg items-center justify-center"
+                    >
+                      <Minus size={14} color="#6B7280" />
+                    </Pressable>
+                    <Text className="text-sm font-medium text-foreground mx-2 min-w-[32px] text-center">
+                      ×{item.quantity}
+                    </Text>
+                    <Pressable
+                      onPress={() => adjustQuantity(item.id, 1)}
+                      className="h-8 w-8 bg-muted rounded-lg items-center justify-center"
+                    >
+                      <Plus size={14} color="#6B7280" />
+                    </Pressable>
+                  </View>
                   <Text className="text-xs text-muted-foreground">
-                    {Math.round(item.calories)} kcal
+                    {Math.round(item.calories * item.quantity)} kcal
                   </Text>
                 </View>
               </View>

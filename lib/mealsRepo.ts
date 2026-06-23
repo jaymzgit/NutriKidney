@@ -22,6 +22,7 @@ export type CreateMealInput = {
   method: "scan" | "voice" | "manual";
   risk_level?: "safe" | "caution" | "danger" | null;
   notes?: string | null;
+  photoUri?: string | null;
   items: NewMealItem[];
 };
 
@@ -45,6 +46,7 @@ export type FetchedMeal = {
   risk_level: string | null;
   notes: string | null;
   logged_at: string;
+  photo_url: string | null;
   meal_items: FetchedMealItem[];
   total_calories: number;
   total_potassium: number;
@@ -52,6 +54,39 @@ export type FetchedMeal = {
   total_sodium: number;
   total_protein: number;
 };
+
+const MEAL_PHOTOS_BUCKET = "meal-photos";
+
+async function uploadMealPhoto(
+  userId: string,
+  mealId: string,
+  localUri: string
+): Promise<string | null> {
+  try {
+    const res = await fetch(localUri);
+    const arrayBuffer = await res.arrayBuffer();
+    const path = `${userId}/${mealId}.jpg`;
+
+    const { error: upErr } = await supabase.storage
+      .from(MEAL_PHOTOS_BUCKET)
+      .upload(path, arrayBuffer, {
+        contentType: "image/jpeg",
+        upsert: true,
+      });
+    if (upErr) {
+      console.log("[meal photo] upload failed:", upErr.message);
+      return null;
+    }
+
+    const { data } = supabase.storage
+      .from(MEAL_PHOTOS_BUCKET)
+      .getPublicUrl(path);
+    return data.publicUrl;
+  } catch (e: any) {
+    console.log("[meal photo] error:", e?.message);
+    return null;
+  }
+}
 
 export async function createMeal(input: CreateMealInput): Promise<string> {
   if (input.items.length === 0) throw new Error("Meal needs at least one item");
@@ -105,6 +140,17 @@ export async function createMeal(input: CreateMealInput): Promise<string> {
     throw new Error(itemsErr.message || "Failed to insert meal items");
   }
 
+  // Optional photo upload — best-effort, don't fail meal log on photo failure
+  if (input.photoUri) {
+    const publicUrl = await uploadMealPhoto(user_id, meal_id, input.photoUri);
+    if (publicUrl) {
+      await supabase
+        .from("meal_logs")
+        .update({ photo_url: publicUrl })
+        .eq("id", meal_id);
+    }
+  }
+
   return meal_id;
 }
 
@@ -125,6 +171,12 @@ export async function deleteMeal(meal_id: string): Promise<void> {
   await supabase.from("meal_items").delete().eq("meal_id", meal_id);
   const { error } = await supabase.from("meal_logs").delete().eq("id", meal_id);
   if (error) throw new Error(error.message);
+
+  // Best-effort photo cleanup
+  await supabase.storage
+    .from(MEAL_PHOTOS_BUCKET)
+    .remove([`${user_id}/${meal_id}.jpg`])
+    .catch(() => {});
 }
 
 export async function fetchMeals(): Promise<FetchedMeal[]> {
@@ -135,7 +187,7 @@ export async function fetchMeals(): Promise<FetchedMeal[]> {
   const { data, error } = await supabase
     .from("meal_logs")
     .select(
-      "id, method, risk_level, notes, logged_at, meal_items(id, food_name, portion_g, calories, potassium_mg, phosphorus_mg, sodium_mg, protein_g, carbs_g, fat_g, confidence)"
+      "id, method, risk_level, notes, logged_at, photo_url, meal_items(id, food_name, portion_g, calories, potassium_mg, phosphorus_mg, sodium_mg, protein_g, carbs_g, fat_g, confidence)"
     )
     .eq("user_id", user_id)
     .order("logged_at", { ascending: false });
@@ -150,6 +202,7 @@ export async function fetchMeals(): Promise<FetchedMeal[]> {
       risk_level: row.risk_level ?? null,
       notes: row.notes ?? null,
       logged_at: row.logged_at,
+      photo_url: row.photo_url ?? null,
       meal_items: items,
       total_calories: items.reduce((a, i) => a + (i.calories || 0), 0),
       total_potassium: items.reduce((a, i) => a + (i.potassium_mg || 0), 0),

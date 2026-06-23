@@ -43,7 +43,7 @@ export const CLASS_NAMES = [
   "Fried-Egg",
   "Fried-Rice",
   "Hokkien-Mee",
-  "Lo-Mein",
+  "Lo-Mein",  
   "Mee-Rebus",
   "Mee-Siam",
   "Peanuts",
