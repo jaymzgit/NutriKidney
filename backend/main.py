@@ -1,11 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from pathlib import Path
 
-# Load environment variables from .env
-load_dotenv()
+# Load environment variables from root .env
+load_dotenv(Path(__file__).parent.parent / ".env")
 
-from routers import auth, food, logs, ocr, scan
+from routers import auth, chat, food, logs, ocr, scan
 
 app = FastAPI(title="CKD Smart Diet Assistant API")
 
@@ -18,6 +19,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router, prefix="/auth")
+app.include_router(chat.router, prefix="/chat")
 app.include_router(food.router, prefix="/food")
 app.include_router(logs.router, prefix="/logs")
 app.include_router(ocr.router, prefix="/ocr")
