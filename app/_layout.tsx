@@ -5,10 +5,13 @@ import { ActivityIndicator, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { useEffect } from "react";
 import { AuthProvider, useAuth } from "@/lib/AuthContext";
+import { ThemeProvider, tokens, useTheme } from "@/lib/theme";
+import { ToastProvider } from "@/components/Toast";
 import { loadModel } from "@/lib/yolo";
 
 function AuthGate() {
   const { isAuthenticated, isLoadingAuth } = useAuth();
+  const { colors, textScale } = useTheme();
   const segments = useSegments();
   const router = useRouter();
 
@@ -25,27 +28,58 @@ function AuthGate() {
   if (isLoadingAuth) {
     return (
       <View className="flex-1 items-center justify-center bg-background">
-        <ActivityIndicator size="large" color="#1A7A55" />
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: colors.background },
+      }}
+    >
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
+      <Stack.Screen
+        name="streak"
+        options={{
+          headerShown: true,
+          title: "Streak",
+          headerBackTitle: "Back",
+          headerTintColor: colors.primary,
+          headerShadowVisible: false,
+          headerStyle: { backgroundColor: colors.background },
+          headerTitleStyle: {
+            color: colors.foreground,
+            fontWeight: tokens.fontWeight.bold,
+            fontSize: tokens.fontSize.title[0] * textScale,
+          },
+        }}
+      />
       <Stack.Screen
         name="alerts"
         options={{
           headerShown: true,
           title: "Nutrient Alerts",
           headerBackTitle: "Back",
-          headerTintColor: "#1A7A55",
-          headerStyle: { backgroundColor: "#FFFFFF" },
-          headerTitleStyle: { color: "#181F29", fontWeight: "700" },
+          headerTintColor: colors.primary,
+          headerShadowVisible: false,
+          headerStyle: { backgroundColor: colors.background },
+          headerTitleStyle: {
+            color: colors.foreground,
+            fontWeight: tokens.fontWeight.bold,
+            fontSize: tokens.fontSize.title[0] * textScale,
+          },
         }}
       />
     </Stack>
   );
+}
+
+function ThemedStatusBar() {
+  const { scheme } = useTheme();
+  return <StatusBar style={scheme === "dark" ? "light" : "dark"} />;
 }
 
 export default function RootLayout() {
@@ -59,10 +93,14 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <AuthProvider>
-        <StatusBar style="dark" />
-        <AuthGate />
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <ToastProvider>
+            <ThemedStatusBar />
+            <AuthGate />
+          </ToastProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </SafeAreaProvider>
   );
 }

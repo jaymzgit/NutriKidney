@@ -1,21 +1,39 @@
 import { useCallback, useMemo, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
-import { Link } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { RefreshControl, Text, View } from "react-native";
+import { useRouter } from "expo-router";
 import Svg, { Circle } from "react-native-svg";
-import { AlertTriangle, ChevronRight, Flame, FlaskConical, Utensils } from "lucide-react-native";
+import { Activity, Camera, Flame, FlaskConical, Utensils } from "lucide-react-native";
 import { useAuth } from "@/lib/AuthContext";
 import { getLimitsForStage } from "@/lib/ckdLimits";
 import { getRiskLevel } from "@/lib/riskEngine";
+import { useTheme } from "@/lib/theme";
 import NutrientProgressBar from "@/components/NutrientProgressBar";
 import MealCard from "@/components/MealCard";
 import { NutrientAlertData } from "@/components/NutrientAlert";
 import { useMeals } from "@/lib/useMeals";
+import { computeStreaks } from "@/lib/streak";
+import Screen from "@/components/Screen";
+import Card from "@/components/Card";
+import SectionTitle from "@/components/SectionTitle";
+import StatusBadge, { STATUS, toStatus } from "@/components/StatusBadge";
+import Banner from "@/components/Banner";
+import ListRow from "@/components/ListRow";
+import EmptyState from "@/components/EmptyState";
+import ErrorState from "@/components/ErrorState";
+import LoadingState from "@/components/LoadingState";
+
+const RISK_LABEL: Record<string, string> = {
+  safe: "On track",
+  caution: "Caution",
+  danger: "Exceeded",
+  unknown: "No stage",
+};
 
 export default function Home() {
   const { user } = useAuth();
-  const insets = useSafeAreaInsets();
-  const { meals, loading, refetch } = useMeals();
+  const router = useRouter();
+  const { colors } = useTheme();
+  const { meals, loading, error, refetch } = useMeals();
   const [refreshing, setRefreshing] = useState(false);
 
   const onRefresh = useCallback(async () => {
@@ -49,16 +67,8 @@ export default function Home() {
   const limits = getLimitsForStage(ckdStage, weightKg);
   const risk = getRiskLevel(totals, ckdStage, weightKg);
 
-  const streak = useMemo(() => {
-    const days = new Set(meals.map((m) => new Date(m.logged_at).toDateString()));
-    let count = 0;
-    const d = new Date();
-    while (days.has(d.toDateString())) {
-      count++;
-      d.setDate(d.getDate() - 1);
-    }
-    return count;
-  }, [meals]);
+  const streakStats = useMemo(() => computeStreaks(meals), [meals]);
+  const streak = streakStats.current;
 
   const nutrientAlerts = useMemo<NutrientAlertData[]>(() => {
     if (!ckdStage) return [];
@@ -105,221 +115,133 @@ export default function Home() {
     100
   );
 
-  const riskColors: Record<string, { bg: string; badgeBg: string; badgeText: string }> = {
-    safe: { bg: "#0F6B47", badgeBg: "bg-emerald-100", badgeText: "text-emerald-700" },
-    caution: { bg: "#B8841B", badgeBg: "bg-amber-100", badgeText: "text-amber-700" },
-    danger: { bg: "#B91C1C", badgeBg: "bg-red-100", badgeText: "text-red-700" },
-    unknown: { bg: "#475569", badgeBg: "bg-slate-100", badgeText: "text-slate-600" },
-  };
-  const rc = riskColors[risk.level] || riskColors.unknown;
+  const level = toStatus(risk.level);
+  const status = STATUS[level];
 
-  const radius = 20;
+  const radius = 40;
   const circ = 2 * Math.PI * radius;
 
+  const initialLoad = loading && meals.length === 0 && !refreshing;
+
   return (
-    <View className="flex-1 bg-background">
-      <View style={{ height: insets.top, backgroundColor: "#FFFFFF" }} />
-      <ScrollView
-        contentContainerStyle={{ paddingBottom: 24 }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#1A7A55"
-            colors={["#1A7A55"]}
-          />
-        }
-      >
-        <View
-          className="px-5 pt-6 pb-5 mb-4 overflow-hidden"
-          style={{
-            backgroundColor: rc.bg,
-            borderBottomLeftRadius: 32,
-            borderBottomRightRadius: 32,
-          }}
-        >
-          <View className="flex-row items-start justify-between mb-3">
-            <View>
-              <Text className="text-white/80 text-[15px] font-medium">
-                {greeting}
-              </Text>
-              <Text className="text-white text-[28px] font-bold">
-                {firstName}
-              </Text>
-              <Text className="text-white/75 text-[13px] mt-0.5">
-                {todayDate}
-              </Text>
-            </View>
-            <View className="bg-white/25 rounded-xl px-3.5 py-2 border border-white/30 items-center">
-              <Text className="text-white/85 text-[13px] font-semibold uppercase">
-                CKD
-              </Text>
-              <Text className="text-white text-[22px] font-bold">
-                {ckdStage ?? "—"}
-              </Text>
-            </View>
-          </View>
-
-          <View className="flex-row items-center bg-white/15 rounded-xl px-4 py-3.5 border border-white/25">
-            <View className="relative items-center justify-center">
-              <Svg
-                width={52}
-                height={52}
-                viewBox="0 0 52 52"
-                style={{ transform: [{ rotate: "-90deg" }] }}
-              >
-                <Circle
-                  cx={26}
-                  cy={26}
-                  r={radius}
-                  fill="none"
-                  stroke="rgba(255,255,255,0.15)"
-                  strokeWidth={5}
-                />
-                <Circle
-                  cx={26}
-                  cy={26}
-                  r={radius}
-                  fill="none"
-                  stroke="white"
-                  strokeWidth={5}
-                  strokeLinecap="round"
-                  strokeDasharray={`${(calPct / 100) * circ} ${circ}`}
-                />
-              </Svg>
-              <View className="absolute inset-0 items-center justify-center">
-                <Text className="text-white text-[13px] font-bold">
-                  {Math.round(calPct)}%
-                </Text>
-              </View>
-            </View>
-            <View className="flex-1 ml-4">
-              <Text className="text-white/85 text-[13px] font-semibold uppercase">
-                Calories Today
-              </Text>
-              <Text className="text-white text-[24px] font-bold">
-                {Math.round(totals.calories)}
-                <Text className="text-white/80 text-[15px] font-normal">
-                  {" "}
-                  / {limits.calories} kcal
-                </Text>
-              </Text>
-            </View>
-            <View className="items-center">
-              <Text className="text-white/70 text-[9px] font-semibold uppercase mb-1">
-                Nutrients
-              </Text>
-              <View className={`px-2.5 py-1 rounded-full ${rc.badgeBg}`}>
-                <Text className={`text-[11px] font-bold uppercase ${rc.badgeText}`}>
-                  {risk.level === "safe"
-                    ? "On track"
-                    : risk.level === "caution"
-                    ? "Caution"
-                    : risk.level === "danger"
-                    ? "Exceeded"
-                    : "No stage"}
-                </Text>
-              </View>
-            </View>
-          </View>
-
+    <Screen
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={colors.primary}
+          colors={[colors.primary]}
+          progressBackgroundColor={colors.card}
+        />
+      }
+    >
+      {/* Greeting */}
+      <View className="flex-row items-start pt-4 pb-6">
+        <View className="flex-1">
+          <Text className="text-title font-bold text-foreground" accessibilityRole="header">
+            {greeting}, {firstName}
+          </Text>
+          <Text className="text-body text-muted-foreground mt-1">{todayDate}</Text>
         </View>
+        <View
+          className="bg-primary-soft rounded-sm px-4 py-2 items-center ml-2"
+          accessible
+          accessibilityLabel={ckdStage ? `CKD stage ${ckdStage}` : "CKD stage not set"}
+        >
+          <Text className="text-caption font-bold text-primary">CKD stage</Text>
+          <Text className="text-title font-bold text-primary">{ckdStage ?? "—"}</Text>
+        </View>
+      </View>
 
-        <View className="px-4">
-          <View className="flex-row -mx-1.5 mb-4">
-            <View className="flex-1 px-1.5">
-              <View className="bg-card rounded-2xl border border-border px-3 py-2.5">
-                <Utensils size={14} color="#2783A6" />
-                <Text className="text-base font-bold text-foreground mt-1.5">
-                  {todayMeals.length}
+      {initialLoad ? (
+        <LoadingState label="Loading today's meals…" />
+      ) : error ? (
+        <Card>
+          <ErrorState
+            title="Couldn't load your meals"
+            message="Your daily totals can't be shown right now. Check your connection and try again."
+            onRetry={refetch}
+          />
+        </Card>
+      ) : (
+        <>
+          {/* Today's status — the one thing to notice first */}
+          <View className={`rounded-lg p-5 mb-4 ${status.bgClass}`}>
+            <StatusBadge level={level} label={RISK_LABEL[risk.level] ?? RISK_LABEL.unknown} />
+            <Text className="text-title font-bold text-foreground mt-4">
+              {risk.message}
+            </Text>
+
+            <View className="flex-row items-center mt-6">
+              <View
+                className="items-center justify-center"
+                accessible
+                accessibilityLabel={`${Math.round(calPct)} percent of daily calories`}
+              >
+                <Svg
+                  width={96}
+                  height={96}
+                  viewBox="0 0 96 96"
+                  style={{ transform: [{ rotate: "-90deg" }] }}
+                >
+                  <Circle cx={48} cy={48} r={radius} fill="none" stroke={colors.card} strokeWidth={10} />
+                  <Circle
+                    cx={48}
+                    cy={48}
+                    r={radius}
+                    fill="none"
+                    stroke={colors[status.fg]}
+                    strokeWidth={10}
+                    strokeLinecap="round"
+                    strokeDasharray={`${(calPct / 100) * circ} ${circ}`}
+                  />
+                </Svg>
+                <View className="absolute inset-0 items-center justify-center">
+                  <Text className="text-body font-bold text-foreground">
+                    {Math.round(calPct)}%
+                  </Text>
+                </View>
+              </View>
+              <View className="flex-1 ml-4">
+                <Text className="text-caption font-bold text-muted-foreground">
+                  Calories today
                 </Text>
-                <Text className="text-[10px] text-muted-foreground">
-                  logged
+                <Text className="text-display font-bold text-foreground">
+                  {Math.round(totals.calories)}
                 </Text>
-                <Text className="text-[10px] font-semibold text-muted-foreground uppercase mt-0.5">
-                  Meals Today
+                <Text className="text-body text-muted-foreground">
+                  of {limits.calories} kcal
                 </Text>
               </View>
-            </View>
-            <View className="flex-1 px-1.5">
-              <View className="bg-card rounded-2xl border border-border px-3 py-2.5">
-                <Flame
-                  size={14}
-                  color={streak > 0 ? "#F97316" : "#9CA3AF"}
-                />
-                <Text className="text-base font-bold text-foreground mt-1.5">
-                  {streak}
-                </Text>
-                <Text className="text-[10px] text-muted-foreground">
-                  day{streak !== 1 ? "s" : ""}
-                </Text>
-                <Text className="text-[10px] font-semibold text-muted-foreground uppercase mt-0.5">
-                  Streak
-                </Text>
-              </View>
-            </View>
-            <View className="flex-1 px-1.5">
-              <Link href="/(tabs)/lab-reports" asChild>
-                <Pressable className="bg-card rounded-2xl border border-border px-3 py-2.5">
-                  <FlaskConical size={14} color={"#1A7A55"} />
-                  <Text className="text-base font-bold text-primary leading-none mt-1.5">
-                    View
-                  </Text>
-                  <Text className="text-base font-bold text-primary leading-none mt-0.5">Results</Text>
-                  <Text className="text-[10px] font-semibold text-muted-foreground uppercase mt-1.5">
-                    Lab Reports
-                  </Text>
-                </Pressable>
-              </Link>
             </View>
           </View>
 
           {nutrientAlerts.length > 0 ? (
-            <Link href="/alerts" asChild>
-              <Pressable className="bg-red-50 border border-red-200 rounded-2xl px-4 py-3 mb-2 flex-row items-center">
-                <View className="h-8 w-8 bg-red-100 rounded-full items-center justify-center">
-                  <AlertTriangle size={16} color="#DC2626" />
-                </View>
-                <Text className="flex-1 ml-3 text-sm font-bold text-red-700">
-                  Nutrient limits exceeded
-                </Text>
-                <View className="h-6 min-w-6 px-1.5 bg-red-600 rounded-full items-center justify-center mr-2">
-                  <Text className="text-[11px] font-bold text-white">
-                    {nutrientAlerts.length}
-                  </Text>
-                </View>
-                <ChevronRight size={18} color="#DC2626" />
-              </Pressable>
-            </Link>
+            <Banner
+              tone="danger"
+              title={`${nutrientAlerts.length} nutrient${nutrientAlerts.length > 1 ? "s" : ""} over your limit`}
+              message="Tap to see which foods and what to swap"
+              onPress={() => router.push("/alerts")}
+            />
           ) : null}
 
-          <View className="bg-card rounded-2xl border border-border p-4 mb-4">
-            <View className="flex-row items-center justify-between mb-4">
-              <Text className="text-sm font-bold text-foreground">
-                Nutrient Tracking
-              </Text>
-              {(!ckdStage || !weightKg) ? (
-                <Link href="/(tabs)/profile" asChild>
-                  <Pressable>
-                    <Text className="text-xs text-primary font-medium">
-                      {!ckdStage ? "Set stage →" : "Add weight →"}
-                    </Text>
-                  </Pressable>
-                </Link>
-              ) : null}
-            </View>
+          {/* Nutrients */}
+          <Card className="mb-4">
+            <SectionTitle icon={Activity} title="Today's nutrients" />
             {!ckdStage ? (
-              <View className="bg-muted/60 rounded-xl px-3 py-2 mb-3">
-                <Text className="text-xs text-muted-foreground italic text-center">
-                  Set your CKD stage in Profile for personalised limits
-                </Text>
-              </View>
+              <Banner
+                tone="info"
+                title="Set your CKD stage"
+                message="Get limits made for you in Profile"
+                onPress={() => router.navigate("/(tabs)/profile")}
+              />
             ) : !weightKg ? (
-              <View className="bg-amber-50 rounded-xl px-3 py-2 mb-3 border border-amber-200">
-                <Text className="text-xs text-amber-700 italic text-center">
-                  Add your weight for accurate calorie & protein limits
-                </Text>
-              </View>
+              <Banner
+                tone="caution"
+                title="Add your weight"
+                message="For accurate calorie & protein limits"
+                onPress={() => router.navigate("/(tabs)/profile")}
+              />
             ) : null}
             <NutrientProgressBar
               label="Potassium"
@@ -353,49 +275,77 @@ export default function Home() {
               unit="g"
               isUnknown={!ckdStage}
             />
+          </Card>
+
+          {/* Quick stats */}
+          <View className="flex-row mb-4">
+            <Card className="flex-1 mr-2">
+              <Utensils size={20} color={colors.info} />
+              <Text className="text-display font-bold text-foreground mt-2">
+                {todayMeals.length}
+              </Text>
+              <Text className="text-caption text-muted-foreground">
+                meal{todayMeals.length !== 1 ? "s" : ""} today
+              </Text>
+            </Card>
+            <Card
+              className="flex-1 ml-2"
+              onPress={() => router.navigate("/streak")}
+              accessibilityLabel={`${streak} day streak. Open streak dashboard`}
+              accessibilityHint="Shows which days you logged meals"
+            >
+              <Flame size={20} color={streak > 0 ? colors.caution : colors.mutedForeground} />
+              <Text className="text-display font-bold text-foreground mt-2">{streak}</Text>
+              <Text className="text-caption text-muted-foreground">
+                day{streak !== 1 ? "s" : ""} in a row
+              </Text>
+            </Card>
           </View>
 
-          <View className="bg-card rounded-2xl border border-border p-4">
-            <View className="flex-row items-center justify-between mb-4">
-              <Text className="text-sm font-bold text-foreground">
-                Today's Meals
-              </Text>
-              <View className="bg-muted px-2.5 py-1 rounded-full">
-                <Text className="text-xs text-muted-foreground font-semibold">
-                  {todayMeals.length}
-                </Text>
-              </View>
-            </View>
+          <ListRow
+            icon={FlaskConical}
+            title="Lab reports"
+            subtitle="Scan and keep your blood test results"
+            onPress={() => router.navigate("/(tabs)/lab-reports")}
+            className="mb-4"
+          />
+
+          {/* Today's meals */}
+          <Card>
+            <SectionTitle
+              icon={Utensils}
+              title="Today's meals"
+              action={
+                todayMeals.length > 0 ? (
+                  <Text className="text-caption font-bold text-muted-foreground">
+                    {todayMeals.length} logged
+                  </Text>
+                ) : undefined
+              }
+            />
             {todayMeals.length === 0 ? (
-              <View className="items-center py-8">
-                <View className="h-16 w-16 bg-muted rounded-2xl items-center justify-center mb-3">
-                  <Utensils size={28} color="#9CA3AF" />
-                </View>
-                <Text className="text-sm text-muted-foreground mb-4">
-                  No meals logged today
-                </Text>
-                <Link href="/(tabs)/scan" asChild>
-                  <Pressable className="bg-primary px-5 py-2.5 rounded-xl">
-                    <Text className="text-primary-foreground text-sm font-semibold">
-                      Log your first meal
-                    </Text>
-                  </Pressable>
-                </Link>
-              </View>
+              <EmptyState
+                icon={Utensils}
+                title="Nothing logged yet today"
+                message="Take a photo of your meal and we'll check it against your limits."
+                action={{
+                  label: "Log a meal",
+                  icon: Camera,
+                  onPress: () => router.navigate("/(tabs)/scan"),
+                }}
+              />
             ) : (
               todayMeals.map((meal) => <MealCard key={meal.id} meal={meal} />)
             )}
-          </View>
+          </Card>
+        </>
+      )}
 
-          <View className="mt-6 px-2 pb-2">
-            <Text className="text-[11px] text-muted-foreground/60 text-center leading-relaxed">
-              NutriKidney is for informational purposes only and is not a substitute
-              for professional medical advice, diagnosis, or treatment. Always consult
-              your nephrologist or dietitian before making dietary changes.
-            </Text>
-          </View>
-        </View>
-      </ScrollView>
-    </View>
+      <Text className="text-caption text-muted-foreground text-center mt-8 px-2">
+        NutriKidney is for informational purposes only and is not a substitute
+        for professional medical advice, diagnosis, or treatment. Always consult
+        your nephrologist or dietitian before making dietary changes.
+      </Text>
+    </Screen>
   );
 }

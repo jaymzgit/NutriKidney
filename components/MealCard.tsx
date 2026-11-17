@@ -1,6 +1,8 @@
 import { Text, View } from "react-native";
-import { Camera, Pencil } from "lucide-react-native";
+import { Camera, Search } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
+import { useTheme } from "@/lib/theme";
+import StatusBadge from "./StatusBadge";
 
 type MealItem = {
   food_name: string;
@@ -27,27 +29,24 @@ export type Meal = {
   photo_url?: string;
 };
 
-const methodIcons: Record<string, LucideIcon> = {
-  scan: Camera,
-  text: Pencil,
-  manual: Pencil,
+export const METHOD_META: Record<string, { icon: LucideIcon; label: string }> = {
+  scan: { icon: Camera, label: "Photo scan" },
+  text: { icon: Search, label: "Typed" },
+  manual: { icon: Search, label: "Searched" },
 };
 
-const riskStyles: Record<string, { badgeBg: string; badgeText: string }> = {
-  safe: { badgeBg: "bg-primary/10", badgeText: "text-primary" },
-  caution: { badgeBg: "bg-[#E6A817]/10", badgeText: "text-[#E6A817]" },
-  danger: { badgeBg: "bg-destructive/10", badgeText: "text-destructive" },
-};
-
-export default function MealCard({ meal }: { meal: Meal }) {
-  const Icon = methodIcons[meal.method || ""] || Pencil;
-  const risk = riskStyles[meal.risk_level || ""] || riskStyles.safe;
-
-  const mealTime = new Date(meal.logged_at).toLocaleTimeString("en-US", {
+export function formatMealTime(iso: string) {
+  return new Date(iso).toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
   });
+}
+
+export default function MealCard({ meal }: { meal: Meal }) {
+  const { colors } = useTheme();
+  const method = METHOD_META[meal.method || ""] || METHOD_META.manual;
+  const Icon = method.icon;
 
   const totalCal =
     meal.meal_items?.reduce((acc, it) => acc + Number(it.calories || 0), 0) ||
@@ -60,27 +59,20 @@ export default function MealCard({ meal }: { meal: Meal }) {
       .join(", ") || "No items recorded";
 
   return (
-    <View className="bg-muted/40 rounded-xl p-3.5 mb-2.5 border border-border/50">
+    <View className="bg-muted rounded-sm p-4 mb-3">
       <View className="flex-row items-center justify-between mb-2">
-        <View className="flex-row items-center gap-2">
-          <Icon size={16} color="#6B7280" />
-          <Text className="text-sm font-semibold text-foreground ml-2">
-            {mealTime}
+        <View className="flex-row items-center flex-1">
+          <Icon size={20} color={colors.mutedForeground} />
+          <Text className="text-body font-bold text-foreground ml-2">
+            {formatMealTime(meal.logged_at)}
           </Text>
         </View>
-        {meal.risk_level ? (
-          <View className={`px-2.5 py-1 rounded-full ${risk.badgeBg}`}>
-            <Text className={`text-xs font-bold ${risk.badgeText}`}>
-              {meal.risk_level.charAt(0).toUpperCase() + meal.risk_level.slice(1)}
-            </Text>
-          </View>
-        ) : null}
+        {meal.risk_level ? <StatusBadge level={meal.risk_level} /> : null}
       </View>
-      <Text className="text-xs text-muted-foreground leading-relaxed mb-2">
-        {itemsText}
-      </Text>
-      <View className="flex-row justify-end">
-        <Text className="text-xs font-bold text-foreground">
+      <Text className="text-body text-foreground">{itemsText}</Text>
+      <View className="flex-row items-center justify-between mt-2">
+        <Text className="text-caption text-muted-foreground">{method.label}</Text>
+        <Text className="text-body font-bold text-foreground">
           {Math.round(totalCal)} kcal
         </Text>
       </View>

@@ -1,14 +1,23 @@
 import { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, RefreshControl, ScrollView, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { Calendar, Utensils } from "lucide-react-native";
+import { Alert, RefreshControl, Text, View } from "react-native";
+import { useRouter } from "expo-router";
+import { Camera, Utensils } from "lucide-react-native";
 import MealHistoryItem from "@/components/MealHistoryItem";
 import type { Meal } from "@/components/MealCard";
 import { useAuth } from "@/lib/AuthContext";
 import { getLimitsForStage } from "@/lib/ckdLimits";
-import { NUTRIENT_COLORS, type NutrientKey } from "@/components/NutrientProgressBar";
+import type { NutrientKey } from "@/components/NutrientProgressBar";
 import { useMeals } from "@/lib/useMeals";
 import { deleteMeal } from "@/lib/mealsRepo";
+import { useTheme } from "@/lib/theme";
+import Screen from "@/components/Screen";
+import ScreenHeader from "@/components/ScreenHeader";
+import Card from "@/components/Card";
+import { STATUS } from "@/components/StatusBadge";
+import type { StatusLevel } from "@/components/StatusBadge";
+import EmptyState from "@/components/EmptyState";
+import ErrorState from "@/components/ErrorState";
+import LoadingState from "@/components/LoadingState";
 
 type DayTotals = {
   calories: number;
@@ -32,15 +41,17 @@ function sumDay(dayMeals: Meal[]): DayTotals {
 }
 
 const nutrientInfo: { key: NutrientKey; limitKey: keyof DayTotals; label: string; unit: string }[] = [
-  { key: "potassium", limitKey: "potassium", label: "K", unit: "mg" },
-  { key: "phosphorus", limitKey: "phosphorus", label: "P", unit: "mg" },
-  { key: "sodium", limitKey: "sodium", label: "Na", unit: "mg" },
+  { key: "potassium", limitKey: "potassium", label: "Potassium", unit: "mg" },
+  { key: "phosphorus", limitKey: "phosphorus", label: "Phosphorus", unit: "mg" },
+  { key: "sodium", limitKey: "sodium", label: "Sodium", unit: "mg" },
   { key: "protein", limitKey: "protein", label: "Protein", unit: "g" },
 ];
 
 export default function MealHistory() {
   const { user } = useAuth();
-  const { meals, loading, refetch } = useMeals();
+  const router = useRouter();
+  const { colors } = useTheme();
+  const { meals, loading, error, refetch } = useMeals();
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const [refreshing, setRefreshing] = useState(false);
@@ -105,135 +116,126 @@ export default function MealHistory() {
   const toggle = (id: string) =>
     setExpandedId((prev) => (prev === id ? null : id));
 
+  const initialLoad = loading && meals.length === 0 && !refreshing;
+
   return (
-    <SafeAreaView className="flex-1 bg-background" edges={["top"]}>
-      <ScrollView
-        contentContainerStyle={{ paddingBottom: 24 }}
-        className="px-4 pt-2"
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#1A7A55" colors={["#1A7A55"]} />
-        }
-      >
-        <View className="flex-row items-center mb-6">
-          <Calendar size={20} color="#1A7A55" />
-          <Text className="text-lg font-bold text-foreground ml-3">
-            Meal History
-          </Text>
-          {meals.length > 0 ? (
-            <View className="ml-auto bg-muted px-2.5 py-1 rounded-full">
-              <Text className="text-xs text-muted-foreground font-semibold">
-                {meals.length} entries
-              </Text>
-            </View>
-          ) : null}
-        </View>
-
-        <View className="flex-row mb-5">
-          {[
-            { dot: "bg-primary", label: "Safe" },
-            { dot: "bg-[#E6A817]", label: "Caution" },
-            { dot: "bg-destructive", label: "Danger" },
-          ].map(({ dot, label }) => (
-            <View key={label} className="flex-row items-center mr-4">
-              <View className={`h-2 w-2 rounded-full ${dot}`} />
-              <Text className="text-xs text-muted-foreground ml-1.5">
-                {label}
-              </Text>
-            </View>
-          ))}
-        </View>
-
-        {loading ? (
-          <View className="items-center py-16">
-            <ActivityIndicator size="large" color="#1A7A55" />
-          </View>
-        ) : meals.length === 0 ? (
-          <View className="items-center py-16">
-            <View className="h-20 w-20 bg-muted rounded-full items-center justify-center mb-4">
-              <Utensils size={32} color="#9CA3AF" />
-            </View>
-            <Text className="text-sm text-muted-foreground">
-              No meals logged yet
+    <Screen
+      header={
+        <ScreenHeader
+          title="Meal history"
+          subtitle={meals.length > 0 ? `${meals.length} meals logged · pull down to refresh` : undefined}
+        />
+      }
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={colors.primary}
+          colors={[colors.primary]}
+          progressBackgroundColor={colors.card}
+        />
+      }
+    >
+      {initialLoad ? (
+        <LoadingState label="Loading your meals…" />
+      ) : error ? (
+        <Card>
+          <ErrorState title="Couldn't load your meals" onRetry={refetch} />
+        </Card>
+      ) : meals.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={Utensils}
+            title="No meals yet"
+            message="Every meal you log will appear here, grouped by day, so you can spot patterns."
+            action={{
+              label: "Log your first meal",
+              icon: Camera,
+              onPress: () => router.navigate("/(tabs)/scan"),
+            }}
+          />
+        </Card>
+      ) : (
+        groupedMeals.map(({ label: dateLabel, meals: dayMeals, totals }) => (
+          <View key={dateLabel} className="mb-8">
+            <Text className="text-title font-bold text-foreground mb-4" accessibilityRole="header">
+              {dateLabel}
             </Text>
-          </View>
-        ) : (
-          <View>
-            {groupedMeals.map(({ label: dateLabel, meals: dayMeals, totals }) => (
-              <View key={dateLabel} className="mb-6">
-                <Text className="text-xs font-semibold text-muted-foreground uppercase mb-2 px-1">
-                  {dateLabel}
+
+            {/* Daily nutrient summary */}
+            <Card className="mb-4">
+              <View className="flex-row items-baseline justify-between mb-4">
+                <Text className="text-body font-bold text-foreground">Day total</Text>
+                <Text className="text-body text-foreground">
+                  <Text className="font-bold">{Math.round(totals.calories)}</Text>
+                  <Text className="text-muted-foreground"> / {limits.calories} kcal</Text>
                 </Text>
-
-                {/* Daily nutrient summary */}
-                <View className="bg-card rounded-2xl border border-border p-3 mb-2">
-                  <View className="flex-row items-center justify-between mb-2">
-                    <Text className="text-xs font-semibold text-foreground">
-                      {Math.round(totals.calories)} kcal
-                    </Text>
-                    <Text className="text-[10px] text-muted-foreground">
-                      / {limits.calories} limit
-                    </Text>
-                  </View>
-                  <View className="flex-row -mx-0.5">
-                    {nutrientInfo.map(({ key, limitKey, label, unit }) => {
-                      const val = totals[limitKey];
-                      const lim = limits[key as keyof typeof limits] as number;
-                      const pct = lim > 0 ? Math.min((val / lim) * 100, 100) : 0;
-                      const over = lim > 0 && val > lim;
-                      const color = NUTRIENT_COLORS[key];
-                      return (
-                        <View key={key} className="flex-1 px-0.5">
-                          <View className="items-center">
-                            <Text
-                              className="text-[10px] font-bold mb-0.5"
-                              style={{ color: over ? "#DC2626" : color }}
-                            >
-                              {label}
-                            </Text>
-                            <View className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-                              <View
-                                className="h-full rounded-full"
-                                style={{
-                                  width: `${pct}%`,
-                                  backgroundColor: over ? "#DC2626" : color,
-                                }}
-                              />
-                            </View>
-                            <Text
-                              className="text-[9px] mt-0.5"
-                              style={{ color: over ? "#DC2626" : "#6B7280" }}
-                            >
-                              {Math.round(val)}{unit}
-                            </Text>
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </View>
-                </View>
-
-                {/* Meal list */}
-                <View className="bg-card rounded-2xl border border-border overflow-hidden">
-                  {dayMeals.map((meal, idx) => (
-                    <View
-                      key={meal.id}
-                      className={idx > 0 ? "border-t border-border" : ""}
-                    >
-                      <MealHistoryItem
-                        meal={meal}
-                        isExpanded={expandedId === meal.id}
-                        onToggle={() => toggle(meal.id)}
-                        photoUrl={meal.photo_url}
-                        onDelete={() => handleDelete(meal.id)}
-                      />
-                    </View>
-                  ))}
-                </View>
               </View>
-            ))}
+              <View className="flex-row flex-wrap -mx-1">
+                {nutrientInfo.map(({ key, limitKey, label, unit }) => {
+                  const val = totals[limitKey];
+                  const lim = limits[key as keyof typeof limits] as number;
+                  const ratio = lim > 0 ? val / lim : 0;
+                  const pct = Math.min(ratio * 100, 100);
+                  const level: StatusLevel = !ckdStage
+                    ? "unknown"
+                    : ratio > 1
+                    ? "danger"
+                    : ratio >= 0.8
+                    ? "caution"
+                    : "safe";
+                  const s = STATUS[level];
+                  const Icon = s.icon;
+                  return (
+                    <View
+                      key={key}
+                      className="w-1/2 px-1 mb-2"
+                      accessible
+                      accessibilityLabel={`${label}: ${Math.round(val)} of ${lim} ${unit}. ${s.label}`}
+                    >
+                      <View className="bg-muted rounded-sm p-3">
+                        <View className="flex-row items-center">
+                          <Icon size={16} color={colors[s.fg]} strokeWidth={2.5} />
+                          <Text className="text-caption text-muted-foreground ml-1" numberOfLines={1}>
+                            {label}
+                          </Text>
+                        </View>
+                        <Text className="text-body font-bold text-foreground mt-1">
+                          {Math.round(val)} {unit}
+                        </Text>
+                        <View className="h-2 bg-card rounded-full overflow-hidden mt-2">
+                          <View
+                            className="h-full rounded-full"
+                            style={{ width: `${pct}%`, backgroundColor: colors[s.fg] }}
+                          />
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </Card>
+
+            {/* Meal list */}
+            <Card padded={false} className="overflow-hidden">
+              {dayMeals.map((meal, idx) => (
+                <View
+                  key={meal.id}
+                  className={idx > 0 ? "border-t border-border" : ""}
+                >
+                  <MealHistoryItem
+                    meal={meal}
+                    isExpanded={expandedId === meal.id}
+                    onToggle={() => toggle(meal.id)}
+                    photoUrl={meal.photo_url}
+                    onDelete={() => handleDelete(meal.id)}
+                  />
+                </View>
+              ))}
+            </Card>
           </View>
-        )}
-      </ScrollView>
-    </SafeAreaView>
+        ))
+      )}
+    </Screen>
   );
 }

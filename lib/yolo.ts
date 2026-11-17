@@ -280,17 +280,11 @@ function postProcess(
     (d) => (d.width * d.height) / imgArea >= MIN_BOX_AREA_FRACTION
   );
 
-  // Dedupe by class — keep highest-confidence box per className
-  const byClass = new Map<string, Detection>();
-  for (const d of filtered) {
-    const cur = byClass.get(d.className);
-    if (!cur || d.confidence > cur.confidence) byClass.set(d.className, d);
-  }
-  const deduped = Array.from(byClass.values());
-
-  const kept = nms(deduped, IOU_THRESHOLD);
+  // Do NOT dedupe by class: two plates of rice are two portions. NMS alone
+  // removes overlapping duplicates of the *same* physical food.
+  const kept = nms(filtered, IOU_THRESHOLD);
   console.log(
-    `[YOLO] kept=${kept.length} (raw=${detections.length}, after-dedupe=${deduped.length})`
+    `[YOLO] kept=${kept.length} (raw=${detections.length}, after-area-filter=${filtered.length})`
   );
   kept.forEach((b) => {
     const cx = ((b.x + b.width / 2) / origWidth * 100).toFixed(1);

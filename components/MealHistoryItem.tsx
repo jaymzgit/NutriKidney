@@ -1,32 +1,10 @@
 import { Alert, Image, Pressable, Text, View } from "react-native";
-import {
-  Camera,
-  ChevronDown,
-  ChevronUp,
-  Pencil,
-  Trash2,
-  Utensils,
-} from "lucide-react-native";
-import type { LucideIcon } from "lucide-react-native";
+import { ChevronDown, ChevronUp, Trash2, Utensils } from "lucide-react-native";
+import { useTheme } from "@/lib/theme";
 import type { Meal } from "./MealCard";
-
-const methodIcons: Record<string, LucideIcon> = {
-  scan: Camera,
-  text: Pencil,
-  manual: Pencil,
-};
-
-const riskDot: Record<string, string> = {
-  safe: "bg-primary",
-  caution: "bg-[#E6A817]",
-  danger: "bg-destructive",
-};
-
-const riskBadge: Record<string, { bg: string; text: string; label: string }> = {
-  safe: { bg: "bg-primary/10", text: "text-primary", label: "Safe" },
-  caution: { bg: "bg-[#E6A817]/15", text: "text-[#E6A817]", label: "Caution" },
-  danger: { bg: "bg-destructive/10", text: "text-destructive", label: "Danger" },
-};
+import { METHOD_META, formatMealTime } from "./MealCard";
+import StatusBadge from "./StatusBadge";
+import Button from "./Button";
 
 const nutrientRows: { key: "potassium" | "phosphorus" | "sodium" | "protein"; label: string; unit: string }[] = [
   { key: "potassium", label: "Potassium", unit: "mg" },
@@ -48,15 +26,9 @@ export default function MealHistoryItem({
   photoUrl?: string;
   onDelete?: () => void;
 }) {
-  const Icon = methodIcons[meal.method || ""] || Pencil;
-  const dot = riskDot[meal.risk_level || ""] || "bg-primary";
-  const badge = meal.risk_level ? riskBadge[meal.risk_level] : null;
-
-  const mealTime = new Date(meal.logged_at).toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
+  const { colors } = useTheme();
+  const method = METHOD_META[meal.method || ""] || METHOD_META.manual;
+  const mealTime = formatMealTime(meal.logged_at);
 
   const itemNames =
     meal.meal_items?.map((i) => i.food_name).join(", ") || "Meal";
@@ -65,129 +37,113 @@ export default function MealHistoryItem({
     meal.meal_items?.reduce((a, i) => a + (i.calories || 0), 0) ||
     0;
 
+  const photo = photoUrl || meal.photo_url;
+
   return (
     <View>
       <Pressable
         onPress={onToggle}
-        className="flex-row items-center gap-3 px-4 py-3.5 active:bg-muted/40"
+        accessibilityRole="button"
+        accessibilityState={{ expanded: isExpanded }}
+        accessibilityLabel={`${itemNames}, ${mealTime}, ${Math.round(totalCal)} calories`}
+        accessibilityHint={isExpanded ? "Hides meal details" : "Shows meal details"}
+        className="flex-row items-center px-4 py-4 active:bg-muted"
       >
-        <View className={`h-2 w-2 rounded-full ${dot}`} />
-        <View className="ml-2">
-          <Icon size={16} color="#6B7280" />
-        </View>
-        <View className="flex-1 min-w-0 ml-2">
-          <Text
-            className="text-sm font-semibold text-foreground"
-            numberOfLines={1}
-          >
+        {photoUrl ? (
+          <Image
+            source={{ uri: photoUrl }}
+            style={{ width: 48, height: 48, borderRadius: 12 }}
+          />
+        ) : (
+          <View className="h-12 w-12 rounded-sm bg-muted items-center justify-center">
+            <Utensils size={20} color={colors.mutedForeground} />
+          </View>
+        )}
+        <View className="flex-1 min-w-0 ml-4">
+          <Text className="text-body font-bold text-foreground" numberOfLines={2}>
             {itemNames}
           </Text>
-          <Text className="text-xs text-muted-foreground">{mealTime}</Text>
-        </View>
-        <View className="flex-row items-center gap-2">
-          {badge ? (
-            <View className={`px-2 py-0.5 rounded-full ${badge.bg}`}>
-              <Text className={`text-[10px] font-bold ${badge.text}`}>
-                {badge.label}
-              </Text>
-            </View>
-          ) : null}
-          {photoUrl ? (
-            <Image
-              source={{ uri: photoUrl }}
-              style={{ width: 32, height: 32, borderRadius: 6 }}
-            />
-          ) : (
-            <View
-              style={{ width: 32, height: 32, borderRadius: 6 }}
-              className="bg-muted items-center justify-center"
-            >
-              <Utensils size={14} color="#9CA3AF" />
-            </View>
-          )}
-          <Text className="text-xs font-bold text-foreground mr-1">
-            {Math.round(totalCal)} kcal
+          <Text className="text-caption text-muted-foreground mt-1">
+            {mealTime} · {Math.round(totalCal)} kcal
           </Text>
+          {meal.risk_level ? (
+            <StatusBadge level={meal.risk_level} className="mt-2" />
+          ) : null}
+        </View>
+        <View className="ml-2">
           {isExpanded ? (
-            <ChevronUp size={16} color="#6B7280" />
+            <ChevronUp size={20} color={colors.mutedForeground} />
           ) : (
-            <ChevronDown size={16} color="#6B7280" />
+            <ChevronDown size={20} color={colors.mutedForeground} />
           )}
         </View>
       </Pressable>
 
       {isExpanded ? (
-        <View className="px-4 pb-4 border-t border-border bg-muted/20">
-          {(photoUrl || meal.photo_url) ? (
+        <View className="px-4 pb-4 pt-2 border-t border-border">
+          {photo ? (
             <Image
-              source={{ uri: (photoUrl || meal.photo_url)! }}
-              style={{ width: "100%", height: 192, borderRadius: 12, marginTop: 16, marginBottom: 16 }}
+              source={{ uri: photo }}
+              style={{ width: "100%", height: 200, borderRadius: 12, marginTop: 8, marginBottom: 8 }}
               resizeMode="cover"
+              accessibilityLabel="Meal photo"
             />
           ) : null}
 
+          <Text className="text-caption text-muted-foreground mt-2">
+            Logged by {method.label.toLowerCase()}
+          </Text>
+
           {meal.meal_items && meal.meal_items.length > 0 ? (
-            <View className="mt-4 mb-4">
-              <Text className="text-xs font-semibold text-muted-foreground uppercase mb-2">
-                Items
-              </Text>
-              <View>
-                {meal.meal_items.map((item, i) => (
-                  <View
-                    key={i}
-                    className="flex-row items-center justify-between mb-1.5"
-                  >
-                    <Text className="text-sm text-foreground">
-                      {item.food_name}
-                    </Text>
-                    <Text className="text-xs text-muted-foreground">
-                      {Math.round(item.portion_g || 0)}g ·{" "}
-                      {Math.round(item.calories || 0)} kcal
-                    </Text>
-                  </View>
-                ))}
-              </View>
+            <View className="mt-4">
+              <Text className="text-body font-bold text-foreground mb-2">Foods</Text>
+              {meal.meal_items.map((item, i) => (
+                <View
+                  key={i}
+                  className="flex-row items-center justify-between py-2 border-b border-border"
+                >
+                  <Text className="text-body text-foreground flex-1 mr-2">
+                    {item.food_name}
+                  </Text>
+                  <Text className="text-caption text-muted-foreground">
+                    {Math.round(item.portion_g || 0)}g · {Math.round(item.calories || 0)} kcal
+                  </Text>
+                </View>
+              ))}
             </View>
           ) : null}
 
-          <View>
-            <Text className="text-xs font-semibold text-muted-foreground uppercase mb-2">
-              Nutrients
-            </Text>
-            <View className="flex-row flex-wrap -mx-1">
-              {nutrientRows.map(({ key, label, unit }) => {
-                const total = meal[`total_${key}` as const];
-                const val =
-                  total ??
-                  meal.meal_items?.reduce(
-                    (a, i) => a + ((i as any)[key] || 0),
-                    0
-                  ) ??
-                  0;
-                return (
-                  <View key={key} className="w-1/2 px-1 mb-2">
-                    <View className="bg-card rounded-lg px-3 py-2 border border-border">
-                      <Text className="text-xs text-muted-foreground">
-                        {label}
-                      </Text>
-                      <Text className="text-sm font-bold text-foreground">
-                        {Math.round(val)} {unit}
-                      </Text>
-                    </View>
+          <Text className="text-body font-bold text-foreground mt-4 mb-2">Nutrients</Text>
+          <View className="flex-row flex-wrap -mx-1">
+            {nutrientRows.map(({ key, label, unit }) => {
+              const total = meal[`total_${key}` as const];
+              const val =
+                total ??
+                meal.meal_items?.reduce((a, i) => a + ((i as any)[key] || 0), 0) ??
+                0;
+              return (
+                <View key={key} className="w-1/2 px-1 mb-2">
+                  <View className="bg-muted rounded-sm px-4 py-3">
+                    <Text className="text-caption text-muted-foreground">{label}</Text>
+                    <Text className="text-body font-bold text-foreground">
+                      {Math.round(val)} {unit}
+                    </Text>
                   </View>
-                );
-              })}
-            </View>
+                </View>
+              );
+            })}
           </View>
 
           {meal.notes ? (
-            <Text className="mt-3 text-xs text-muted-foreground italic">
-              {meal.notes}
-            </Text>
+            <Text className="mt-2 text-body text-muted-foreground">{meal.notes}</Text>
           ) : null}
 
           {onDelete ? (
-            <Pressable
+            <Button
+              variant="destructive-outline"
+              size="sm"
+              icon={Trash2}
+              className="mt-4"
               onPress={() =>
                 Alert.alert(
                   "Delete Meal",
@@ -198,13 +154,9 @@ export default function MealHistoryItem({
                   ]
                 )
               }
-              className="flex-row items-center justify-center mt-4 py-2.5 rounded-xl border border-destructive/40 active:bg-destructive/10"
             >
-              <Trash2 size={14} color="#DC2626" />
-              <Text className="text-xs font-semibold text-destructive ml-2">
-                Delete Meal
-              </Text>
-            </Pressable>
+              Delete this meal
+            </Button>
           ) : null}
         </View>
       ) : null}

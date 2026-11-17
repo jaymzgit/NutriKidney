@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { Lock } from "lucide-react-native";
 import AuthLayout from "@/components/AuthLayout";
 import Button from "@/components/Button";
 import TextField from "@/components/TextField";
+import Banner from "@/components/Banner";
 import { useAuth } from "@/lib/AuthContext";
 
 export default function ResetPassword() {
@@ -36,33 +36,29 @@ export default function ResetPassword() {
     <AuthLayout
       icon={Lock}
       title="New password"
-      subtitle="Enter your new password below"
+      subtitle="Choose a new password for your account"
     >
-      {error ? (
-        <View className="mb-4 p-3 rounded-lg bg-destructive/10">
-          <Text className="text-destructive text-sm">{error}</Text>
-        </View>
-      ) : null}
+      {error ? <Banner tone="danger" message={error} /> : null}
       <TextField
-        label="New Password"
+        label="New password"
         icon={Lock}
         value={newPassword}
         onChangeText={setNewPassword}
-        placeholder="••••••••"
+        placeholder="New password"
         secureTextEntry
         autoComplete="password-new"
       />
       <TextField
-        label="Confirm Password"
+        label="Confirm new password"
         icon={Lock}
         value={confirmPassword}
         onChangeText={setConfirmPassword}
-        placeholder="••••••••"
+        placeholder="Type it again"
         secureTextEntry
         autoComplete="password-new"
       />
       <Button onPress={handleSubmit} loading={loading} className="mt-2">
-        Reset password
+        Save new password
       </Button>
     </AuthLayout>
   );

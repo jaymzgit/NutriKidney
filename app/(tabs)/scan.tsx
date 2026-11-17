@@ -2,18 +2,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   Dimensions,
   Image,
   Pressable,
-  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFocusEffect, useRouter } from "expo-router";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
@@ -25,36 +25,34 @@ import {
   Plus,
   RefreshCw,
   Search,
+  SearchX,
+  Sun,
   Trash2,
+  Utensils,
   X,
 } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
 import Button from "@/components/Button";
+import Screen from "@/components/Screen";
+import ScreenHeader from "@/components/ScreenHeader";
+import Card from "@/components/Card";
+import SectionTitle from "@/components/SectionTitle";
+import SegmentedControl from "@/components/SegmentedControl";
+import IconButton from "@/components/IconButton";
+import Banner from "@/components/Banner";
+import StatusBadge, { toStatus } from "@/components/StatusBadge";
+import { useToast } from "@/components/Toast";
 import { detectFood, isModelLoaded } from "@/lib/yolo";
 import { matchFood, scaleFood, searchFoods } from "@/lib/foodDb";
 import { createMeal } from "@/lib/mealsRepo";
 import { useAuth } from "@/lib/AuthContext";
 import { useMeals } from "@/lib/useMeals";
 import { getMealRiskLevel } from "@/lib/riskEngine";
-
-const RISK_BADGE: Record<string, { bg: string; text: string; label: string }> = {
-  safe: { bg: "bg-primary/15", text: "text-primary", label: "Safe" },
-  caution: { bg: "bg-[#E6A817]/15", text: "text-[#E6A817]", label: "Caution" },
-  danger: { bg: "bg-destructive/15", text: "text-destructive", label: "Danger" },
-};
+import { tokens, useTheme } from "@/lib/theme";
 
 /* ── Types ──────────────────────────────────────────── */
 
 type ModeKey = "scan" | "manual";
-
-type Mode = {
-  key: ModeKey;
-  icon: LucideIcon;
-  label: string;
-  title: string;
-  description: string;
-  color: string;
-};
 
 type FoodResult = {
   name: string;
@@ -76,40 +74,46 @@ type CartItem = FoodResult & { id: string; quantity: number; bbox?: BBox };
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
-const BBOX_COLORS = [
-  "#1A7A55",
-  "#E6A817",
-  "#2783A6",
-  "#DC2626",
-  "#7C3AED",
-  "#DB2777",
-  "#059669",
-  "#D97706",
+const BBOX_COLORS = tokens.fixed.detection;
+
+const MODE_OPTIONS: { value: ModeKey; label: string; icon: LucideIcon }[] = [
+  { value: "scan", label: "Scan photo", icon: Camera },
+  { value: "manual", label: "Search", icon: Search },
 ];
 
-const modes: Mode[] = [
-  {
-    key: "scan",
-    icon: Camera,
-    label: "Scan",
-    title: "Scan Food Photo",
-    description: "Take a photo and AI will identify each food item",
-    color: "#1A7A55",
-  },
-  {
-    key: "manual",
-    icon: Search,
-    label: "Manual",
-    title: "Manual Log",
-    description:
-      "Search our Malaysian food database and log items with custom portions",
-    color: "#2783A6",
-  },
-];
+/** Shown before the user types, so the search screen is never blank. */
+const POPULAR_SEARCHES = ["Rice", "Roti Canai", "Fried Egg", "Chicken Rendang", "Mee Rebus"];
 
 let nextId = 0;
 function uid() {
   return `cart-${++nextId}`;
+}
+
+/* ── Small UI pieces ─────────────────────────────────── */
+
+function Stepper({
+  label,
+  value,
+  onMinus,
+  onPlus,
+}: {
+  label: string;
+  value: string;
+  onMinus: () => void;
+  onPlus: () => void;
+}) {
+  return (
+    <View className="flex-1 bg-muted rounded-sm p-2">
+      <Text className="text-caption text-muted-foreground text-center">{label}</Text>
+      <View className="flex-row items-center justify-between mt-1">
+        <IconButton icon={Minus} soft tone="primary" accessibilityLabel={`Less ${label.toLowerCase()}`} onPress={onMinus} />
+        <Text className="text-body font-bold text-foreground" accessibilityLiveRegion="polite">
+          {value}
+        </Text>
+        <IconButton icon={Plus} soft tone="primary" accessibilityLabel={`More ${label.toLowerCase()}`} onPress={onPlus} />
+      </View>
+    </View>
+  );
 }
 
 /* ── Component ──────────────────────────────────────── */
@@ -117,8 +121,9 @@ function uid() {
 export default function ScanMeal() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+  const toast = useToast();
   const [active, setActive] = useState<ModeKey>("scan");
-  const current = modes.find((m) => m.key === active)!;
 
   const { user } = useAuth();
   const ckdStage = user?.ckd_stage ?? null;
@@ -169,6 +174,25 @@ export default function ScanMeal() {
   useEffect(() => {
     if (showReview && cart.length === 0) setShowReview(false);
   }, [showReview, cart.length]);
+
+  // Android back button steps out of camera / review instead of leaving the tab.
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+        if (showCamera) {
+          setShowCamera(false);
+          setCapturedUri(null);
+          return true;
+        }
+        if (showReview) {
+          setShowReview(false);
+          return true;
+        }
+        return false;
+      });
+      return () => sub.remove();
+    }, [showCamera, showReview])
+  );
 
   /* ── Cart helpers ──────────────────────────────────── */
 
@@ -449,14 +473,20 @@ export default function ScanMeal() {
       setScanImageSize(null);
       setQuery("");
       setResults([]);
-      Alert.alert("Logged", "Meal saved successfully");
+      toast("Meal saved — well done!");
       router.navigate("/(tabs)");
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Failed to log meal");
     } finally {
       setSubmitting(false);
     }
-  }, [cart, active, router, meals, ckdStage, weightKg, scanImageUri]);
+  }, [cart, active, router, meals, ckdStage, weightKg, scanImageUri, toast]);
+
+  const logButton = (
+    <Button onPress={submitMeal} loading={submitting} icon={Check}>
+      {`Log meal · ${cart.length} item${cart.length > 1 ? "s" : ""}`}
+    </Button>
+  );
 
   /* ── Full-screen camera overlay ───────────────────── */
 
@@ -470,6 +500,7 @@ export default function ScanMeal() {
             source={{ uri: capturedUri }}
             style={styles.cameraPreview}
             resizeMode="contain"
+            accessibilityLabel="Your meal photo"
           />
         ) : (
           <CameraView
@@ -486,50 +517,77 @@ export default function ScanMeal() {
               setShowCamera(false);
               setCapturedUri(null);
             }}
-            style={styles.iconBtn}
+            style={styles.roundBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Close camera"
           >
-            <X size={22} color="#FFFFFF" />
+            <X size={24} color={tokens.fixed.white} />
           </Pressable>
-          <Text style={styles.topTitle}>Scan Your Meal</Text>
-          <View style={{ width: 40 }} />
+          <Text style={styles.topTitle} accessibilityRole="header">
+            {capturedUri ? "Use this photo?" : "Scan your meal"}
+          </Text>
+          <View style={{ width: 56 }} />
         </View>
 
+        {/* Detecting overlay — turn the wait into reassurance */}
+        {detecting ? (
+          <View style={styles.detectingOverlay} accessibilityLiveRegion="polite">
+            <ActivityIndicator size="large" color={tokens.fixed.white} />
+            <Text style={styles.detectingTitle}>Finding the foods on your plate…</Text>
+            <Text style={styles.detectingHint}>This usually takes a few seconds</Text>
+          </View>
+        ) : null}
+
         {/* Bottom controls */}
-        <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
+        <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 24 }]}>
           {capturedUri ? (
             <View style={styles.freezeControls}>
               <Pressable
                 onPress={() => setCapturedUri(null)}
-                style={styles.freezeBtn}
+                disabled={detecting}
+                style={[styles.freezeBtn, detecting && { opacity: 0.5 }]}
+                accessibilityRole="button"
               >
-                <RefreshCw size={20} color="#FFFFFF" />
+                <RefreshCw size={20} color={tokens.fixed.white} />
                 <Text style={styles.freezeBtnText}>Retake</Text>
               </Pressable>
-              {detecting ? (
-                <View style={[styles.freezeBtn, styles.useBtn]}>
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                  <Text style={styles.freezeBtnText}>Detecting...</Text>
-                </View>
-              ) : (
-                <Pressable
-                  onPress={usePhoto}
-                  style={[styles.freezeBtn, styles.useBtn]}
-                >
-                  <Check size={20} color="#FFFFFF" />
-                  <Text style={styles.freezeBtnText}>Use Photo</Text>
-                </Pressable>
-              )}
+              <Pressable
+                onPress={usePhoto}
+                disabled={detecting}
+                style={[styles.freezeBtn, { backgroundColor: tokens.palettes.light.primary }]}
+                accessibilityRole="button"
+                accessibilityState={{ busy: detecting }}
+              >
+                <Check size={20} color={tokens.fixed.white} />
+                <Text style={styles.freezeBtnText}>Use photo</Text>
+              </Pressable>
             </View>
           ) : (
-            <View style={styles.captureRow}>
-              <Pressable onPress={pickFromGallery} style={styles.iconBtn}>
-                <ImageIcon size={24} color="#FFFFFF" />
-              </Pressable>
-              <Pressable onPress={takePicture} style={styles.captureBtn}>
-                <View style={styles.captureInner} />
-              </Pressable>
-              <View style={{ width: 40 }} />
-            </View>
+            <>
+              <Text style={styles.cameraHint}>Fit the whole plate in the frame</Text>
+              <View style={styles.captureRow}>
+                <Pressable
+                  onPress={pickFromGallery}
+                  style={styles.sideBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel="Choose from gallery"
+                >
+                  <View style={styles.roundBtn}>
+                    <ImageIcon size={24} color={tokens.fixed.white} />
+                  </View>
+                  <Text style={styles.sideBtnText}>Gallery</Text>
+                </Pressable>
+                <Pressable
+                  onPress={takePicture}
+                  style={styles.captureBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel="Take photo"
+                >
+                  <View style={styles.captureInner} />
+                </Pressable>
+                <View style={styles.sideBtn} />
+              </View>
+            </>
           )}
         </View>
       </View>
@@ -539,7 +597,7 @@ export default function ScanMeal() {
   /* ── Review screen with highlighted image ────────── */
 
   if (showReview && cart.length > 0) {
-    const displayW = SCREEN_W - 32;
+    const displayW = Math.min(SCREEN_W - 32, 600);
     const displayH =
       scanImageSize && scanImageSize.w > 0
         ? displayW * (scanImageSize.h / scanImageSize.w)
@@ -570,257 +628,192 @@ export default function ScanMeal() {
       protein_g: c.protein_g * c.quantity,
     }));
     const mealRisk = getMealRiskLevel(scaledCart, ckdStage, weightKg, todayTotals);
-    const riskBadge = RISK_BADGE[mealRisk.level] || RISK_BADGE.safe;
 
     return (
-      <SafeAreaView className="flex-1 bg-background" edges={["top"]}>
-        <ScrollView
-          className="px-4 pt-4"
-          contentContainerStyle={{ paddingBottom: 120 }}
-          keyboardShouldPersistTaps="handled"
-        >
-          {/* Header */}
-          <View className="flex-row items-center mb-4">
-            <Pressable
-              onPress={() => {
-                setShowReview(false);
-                setCart([]);
-                setScanImageUri(null);
-                setScanImageSize(null);
-                setScanSource(null);
-                setCapturedUri(null);
-                setShowCamera(false);
-              }}
-              className="mr-3 p-1"
-            >
-              <X size={20} color="#6B7280" />
-            </Pressable>
-            <Text className="text-lg font-bold text-foreground">
-              Review Your Meal
-            </Text>
-            {ckdStage ? (
-              <View
-                className={`ml-auto px-2.5 py-1 rounded-full ${riskBadge.bg}`}
-              >
-                <Text className={`text-[11px] font-bold ${riskBadge.text}`}>
-                  {riskBadge.label}
-                </Text>
-              </View>
-            ) : null}
-            {scanSource && (
-              <View
-                className={`${ckdStage ? "ml-2" : "ml-auto"} px-2 py-1 rounded-full ${
-                  scanSource === "device" ? "bg-primary/15" : "bg-amber-100"
-                }`}
-              >
-                <Text
-                  className={`text-[10px] font-semibold ${
-                    scanSource === "device"
-                      ? "text-primary"
-                      : "text-amber-800"
-                  }`}
-                >
-                  {scanSource === "device" ? "On-Device YOLO26" : "Cloud API"}
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {/* Image with bounding box overlays */}
-          {scanImageUri && scanImageSize && (
-            <View
-              className="rounded-2xl overflow-hidden mb-4 border border-border"
+      <Screen
+        header={
+          <ScreenHeader
+            title="Review your meal"
+            subtitle={
+              scanSource === "device"
+                ? "Scanned on your phone"
+                : scanSource === "api"
+                ? "Scanned online"
+                : undefined
+            }
+            onBack={() => {
+              setShowReview(false);
+              setCart([]);
+              setScanImageUri(null);
+              setScanImageSize(null);
+              setScanSource(null);
+              setCapturedUri(null);
+              setShowCamera(false);
+            }}
+            backIcon={X}
+            backLabel="Discard this scan"
+          />
+        }
+        footer={logButton}
+      >
+        {/* Image with bounding box overlays */}
+        {scanImageUri && scanImageSize && (
+          <View
+            className="rounded-md overflow-hidden mb-4 border border-border"
+            style={{ width: displayW, height: displayH }}
+          >
+            <Image
+              source={{ uri: scanImageUri }}
               style={{ width: displayW, height: displayH }}
-            >
-              <Image
-                source={{ uri: scanImageUri }}
-                style={{ width: displayW, height: displayH }}
-                resizeMode="cover"
-              />
-              {cart.flatMap((item, idx) => {
-                if (!item.bbox || !scanImageSize) return [];
-                const sx = displayW / scanImageSize.w;
-                const sy = displayH / scanImageSize.h;
-                const color = BBOX_COLORS[idx % BBOX_COLORS.length];
-                const left = item.bbox.x * sx;
-                const top = item.bbox.y * sy;
-                const w = item.bbox.w * sx;
-                const h = item.bbox.h * sy;
-                return [
-                  <View
-                    key={`bbox-${item.id}`}
-                    pointerEvents="none"
-                    style={[
-                      styles.bbox,
-                      {
-                        left,
-                        top,
-                        width: w,
-                        height: h,
-                        borderColor: color,
-                      },
-                    ]}
-                  />,
-                  <View
-                    key={`lbl-${item.id}`}
-                    pointerEvents="none"
-                    style={[
-                      styles.bboxLabel,
-                      {
-                        backgroundColor: color,
-                        left,
-                        top: Math.max(0, top - 16),
-                      },
-                    ]}
-                  >
-                    <Text style={styles.bboxLabelText} numberOfLines={1}>
-                      {item.name} {Math.round(item.confidence * 100)}%
-                    </Text>
-                  </View>,
-                ];
-              })}
-            </View>
-          )}
-
-          {/* Detected items */}
-          {cart.map((item, idx) => (
-            <View
-              key={item.id}
-              className="bg-card rounded-2xl border border-border p-4 mb-3"
-            >
-              {/* Name + color dot + confidence + remove */}
-              <View className="flex-row items-center justify-between mb-3">
-                <View className="flex-row items-center flex-1">
-                  <View
-                    style={{
-                      width: 12,
-                      height: 12,
-                      borderRadius: 3,
-                      backgroundColor: item.bbox
-                        ? BBOX_COLORS[idx % BBOX_COLORS.length]
-                        : "#9CA3AF",
-                      marginRight: 8,
-                    }}
-                  />
-                  <Text className="text-sm font-bold text-foreground flex-1">
+              resizeMode="cover"
+              accessibilityLabel="Your meal photo with detected foods outlined"
+            />
+            {cart.flatMap((item, idx) => {
+              if (!item.bbox || !scanImageSize) return [];
+              const sx = displayW / scanImageSize.w;
+              const sy = displayH / scanImageSize.h;
+              const color = BBOX_COLORS[idx % BBOX_COLORS.length];
+              const left = item.bbox.x * sx;
+              const top = item.bbox.y * sy;
+              const w = item.bbox.w * sx;
+              const h = item.bbox.h * sy;
+              return [
+                <View
+                  key={`bbox-${item.id}`}
+                  pointerEvents="none"
+                  style={[
+                    styles.bbox,
+                    { left, top, width: w, height: h, borderColor: color },
+                  ]}
+                />,
+                <View
+                  key={`lbl-${item.id}`}
+                  pointerEvents="none"
+                  style={[
+                    styles.bboxLabel,
+                    { backgroundColor: color, left, top: Math.max(0, top - 22) },
+                  ]}
+                >
+                  <Text style={styles.bboxLabelText} numberOfLines={1}>
                     {item.name}
                   </Text>
-                </View>
+                </View>,
+              ];
+            })}
+          </View>
+        )}
+
+        <Banner
+          tone="info"
+          message="Check each food and portion below. Use − and + to fix anything that looks wrong."
+        />
+
+        {/* Detected items */}
+        {cart.map((item, idx) => (
+          <Card key={item.id} className="mb-4">
+            <View className="flex-row items-center mb-4">
+              <View
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: 4,
+                  backgroundColor: item.bbox
+                    ? BBOX_COLORS[idx % BBOX_COLORS.length]
+                    : colors.mutedForeground,
+                }}
+              />
+              <View className="flex-1 ml-2">
+                <Text className="text-body font-bold text-foreground">{item.name}</Text>
                 {item.confidence > 0 && (
-                  <View className="bg-muted px-2 py-0.5 rounded-full mr-2">
-                    <Text className="text-[10px] text-muted-foreground">
-                      {Math.round(item.confidence * 100)}%
-                    </Text>
-                  </View>
+                  <Text className="text-caption text-muted-foreground">
+                    {Math.round(item.confidence * 100)}% sure
+                  </Text>
                 )}
-                <Pressable onPress={() => removeFromCart(item.id)}>
-                  <Trash2 size={16} color="#DC2626" />
-                </Pressable>
               </View>
+              <IconButton
+                icon={Trash2}
+                tone="danger"
+                accessibilityLabel={`Remove ${item.name}`}
+                onPress={() => removeFromCart(item.id)}
+              />
+            </View>
 
-              {/* Portion + quantity */}
-              <View className="flex-row gap-2 mb-3">
-                <View className="flex-1 flex-row items-center justify-center bg-muted/50 rounded-xl py-2">
-                  <Pressable
-                    onPress={() => adjustPortion(item.id, -5)}
-                    className="h-9 w-9 bg-card rounded-lg items-center justify-center border border-border"
-                  >
-                    <Minus size={14} color="#6B7280" />
-                  </Pressable>
-                  <View className="mx-3 min-w-[70px] items-center">
-                    <Text className="text-[9px] text-muted-foreground uppercase">Portion</Text>
-                    <Text className="text-base font-bold text-foreground">
-                      {Math.round(item.portion_g)}g
-                    </Text>
-                  </View>
-                  <Pressable
-                    onPress={() => adjustPortion(item.id, 5)}
-                    className="h-9 w-9 bg-card rounded-lg items-center justify-center border border-border"
-                  >
-                    <Plus size={14} color="#6B7280" />
-                  </Pressable>
-                </View>
-                <View className="flex-row items-center justify-center bg-muted/50 rounded-xl py-2 px-2">
-                  <Pressable
-                    onPress={() => adjustQuantity(item.id, -1)}
-                    className="h-9 w-9 bg-card rounded-lg items-center justify-center border border-border"
-                  >
-                    <Minus size={14} color="#6B7280" />
-                  </Pressable>
-                  <View className="mx-2 min-w-[40px] items-center">
-                    <Text className="text-[9px] text-muted-foreground uppercase">Qty</Text>
-                    <Text className="text-base font-bold text-foreground">
-                      ×{item.quantity}
-                    </Text>
-                  </View>
-                  <Pressable
-                    onPress={() => adjustQuantity(item.id, 1)}
-                    className="h-9 w-9 bg-card rounded-lg items-center justify-center border border-border"
-                  >
-                    <Plus size={14} color="#6B7280" />
-                  </Pressable>
-                </View>
+            {/* Not in food_db.json — nutrients would silently log as 0 */}
+            {item.calories === 0 && (
+              <Banner
+                tone="caution"
+                message="Not in the food database — nutrients show as 0. Remove it and add the food manually for accurate totals."
+              />
+            )}
+
+            <View className="flex-row mb-4">
+              <View className="flex-1 mr-2">
+                <Stepper
+                  label="Portion"
+                  value={`${Math.round(item.portion_g)} g`}
+                  onMinus={() => adjustPortion(item.id, -5)}
+                  onPlus={() => adjustPortion(item.id, 5)}
+                />
               </View>
+              <View className="flex-1 ml-2">
+                <Stepper
+                  label="Servings"
+                  value={`×${item.quantity}`}
+                  onMinus={() => adjustQuantity(item.id, -1)}
+                  onPlus={() => adjustQuantity(item.id, 1)}
+                />
+              </View>
+            </View>
 
-              {/* Nutrient grid (scaled by quantity) */}
-              <View className="flex-row flex-wrap">
-                {[
-                  { label: "Calories", val: `${Math.round(item.calories * item.quantity)}`, u: "kcal" },
-                  { label: "Potassium", val: `${Math.round(item.potassium_mg * item.quantity)}`, u: "mg" },
-                  { label: "Phosphorus", val: `${Math.round(item.phosphorus_mg * item.quantity)}`, u: "mg" },
-                  { label: "Sodium", val: `${Math.round(item.sodium_mg * item.quantity)}`, u: "mg" },
-                  { label: "Protein", val: (item.protein_g * item.quantity).toFixed(1), u: "g" },
-                  { label: "Carbs", val: (item.carbs_g * item.quantity).toFixed(1), u: "g" },
-                  { label: "Fat", val: (item.fat_g * item.quantity).toFixed(1), u: "g" },
-                ].map((n) => (
-                  <View key={n.label} className="w-1/3 mb-2">
-                    <Text className="text-[10px] text-muted-foreground">
-                      {n.label}
-                    </Text>
-                    <Text className="text-xs font-semibold text-foreground">
+            {/* Nutrient grid (scaled by quantity) */}
+            <View className="flex-row flex-wrap -mx-1">
+              {[
+                { label: "Calories", val: `${Math.round(item.calories * item.quantity)}`, u: "kcal" },
+                { label: "Potassium", val: `${Math.round(item.potassium_mg * item.quantity)}`, u: "mg" },
+                { label: "Phosphorus", val: `${Math.round(item.phosphorus_mg * item.quantity)}`, u: "mg" },
+                { label: "Sodium", val: `${Math.round(item.sodium_mg * item.quantity)}`, u: "mg" },
+                { label: "Protein", val: (item.protein_g * item.quantity).toFixed(1), u: "g" },
+                { label: "Carbs", val: (item.carbs_g * item.quantity).toFixed(1), u: "g" },
+                { label: "Fat", val: (item.fat_g * item.quantity).toFixed(1), u: "g" },
+              ].map((n) => (
+                <View key={n.label} className="w-1/2 px-1 mb-2">
+                  <View className="bg-muted rounded-sm px-3 py-2">
+                    <Text className="text-caption text-muted-foreground">{n.label}</Text>
+                    <Text className="text-body font-bold text-foreground">
                       {n.val} {n.u}
                     </Text>
                   </View>
-                ))}
+                </View>
+              ))}
+            </View>
+          </Card>
+        ))}
+
+        {/* Meal totals */}
+        <Card>
+          <SectionTitle
+            title="This meal in total"
+            action={ckdStage ? <StatusBadge level={toStatus(mealRisk.level)} /> : undefined}
+          />
+          <Text className="text-display font-bold text-foreground">
+            {Math.round(totalCal)}
+            <Text className="text-body font-normal text-muted-foreground"> kcal</Text>
+          </Text>
+          <View className="flex-row flex-wrap mt-2">
+            {[
+              { l: "Potassium", v: `${Math.round(totalK)} mg` },
+              { l: "Phosphorus", v: `${Math.round(totalP)} mg` },
+              { l: "Sodium", v: `${Math.round(totalNa)} mg` },
+              { l: "Protein", v: `${totalPro.toFixed(1)} g` },
+            ].map(({ l, v }) => (
+              <View key={l} className="w-1/2 py-1">
+                <Text className="text-caption text-muted-foreground">{l}</Text>
+                <Text className="text-body font-bold text-foreground">{v}</Text>
               </View>
-            </View>
-          ))}
-
-          {/* Meal totals */}
-          <View className="bg-muted/50 rounded-xl border border-border p-3 mb-4">
-            <Text className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">
-              Meal Totals
-            </Text>
-            <View className="flex-row flex-wrap gap-x-4 gap-y-1">
-              <Text className="text-xs font-semibold text-foreground">
-                {Math.round(totalCal)} kcal
-              </Text>
-              <Text className="text-xs text-foreground">
-                K: {Math.round(totalK)}mg
-              </Text>
-              <Text className="text-xs text-foreground">
-                P: {Math.round(totalP)}mg
-              </Text>
-              <Text className="text-xs text-foreground">
-                Na: {Math.round(totalNa)}mg
-              </Text>
-              <Text className="text-xs text-foreground">
-                Pro: {totalPro.toFixed(1)}g
-              </Text>
-            </View>
+            ))}
           </View>
-
-          {/* Log button */}
-          <Button onPress={submitMeal} loading={submitting}>
-            <View className="flex-row items-center">
-              <Check size={18} color="#FFFFFF" />
-              <Text className="text-primary-foreground font-semibold ml-2">
-                Log Meal ({cart.length} item{cart.length > 1 ? "s" : ""})
-              </Text>
-            </View>
-          </Button>
-        </ScrollView>
-      </SafeAreaView>
+        </Card>
+      </Screen>
     );
   }
 
@@ -829,256 +822,212 @@ export default function ScanMeal() {
   const cartTotal = cart.reduce((a, c) => a + c.calories * c.quantity, 0);
 
   return (
-    <SafeAreaView className="flex-1 bg-background" edges={["top"]}>
-      <ScrollView
-        contentContainerStyle={{ paddingBottom: 120 }}
-        className="px-4 pt-4"
-        keyboardShouldPersistTaps="handled"
-      >
-        <Text className="text-lg font-bold text-foreground mb-4">
-          Log a Meal
-        </Text>
+    <Screen
+      header={
+        <ScreenHeader
+          title="Log a meal"
+          subtitle="Take a photo or search for what you ate"
+        />
+      }
+      footer={cart.length > 0 ? logButton : undefined}
+    >
+      <SegmentedControl
+        options={MODE_OPTIONS}
+        value={active}
+        onChange={setActive}
+        className="mb-4"
+      />
 
-        {/* Mode selector */}
-        <View className="flex-row bg-muted rounded-xl p-1 mb-6">
-          {modes.map(({ key, icon: Icon, label, color }) => {
-            const selected = key === active;
-            return (
-              <Pressable
-                key={key}
-                onPress={() => setActive(key)}
-                className={`flex-1 flex-row items-center justify-center py-2.5 rounded-lg ${
-                  selected ? "bg-card" : ""
-                }`}
-                style={
-                  selected
-                    ? {
-                        shadowColor: "#000",
-                        shadowOffset: { width: 0, height: 1 },
-                        shadowOpacity: 0.08,
-                        shadowRadius: 2,
-                        elevation: 2,
-                      }
-                    : undefined
-                }
-              >
-                <Icon size={16} color={selected ? color : "#9CA3AF"} />
-                <Text
-                  className={`ml-1.5 text-[13px] font-semibold ${
-                    selected ? "text-foreground" : "text-muted-foreground"
-                  }`}
-                >
-                  {label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        {/* Mode header card */}
-        <View className="bg-card rounded-2xl border border-border p-4 mb-4">
-          <View className="flex-row items-center mb-2">
-            <View
-              className="h-10 w-10 rounded-xl items-center justify-center mr-3"
-              style={{ backgroundColor: current.color }}
-            >
-              <current.icon size={20} color="#FFFFFF" />
+      {/* ── Scan mode ──────────────────────────────── */}
+      {active === "scan" && (
+        <Card>
+          <View className="items-center mb-6">
+            <View className="h-16 w-16 rounded-full bg-primary-soft items-center justify-center mb-4">
+              <Camera size={28} color={colors.primary} />
             </View>
-            <View className="flex-1">
-              <Text className="text-sm font-bold text-foreground">
-                {current.title}
-              </Text>
-              <Text className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
-                {current.description}
-              </Text>
-            </View>
+            <Text className="text-title font-bold text-foreground text-center">
+              Scan your plate
+            </Text>
+            <Text className="text-body text-muted-foreground text-center mt-2">
+              Take a photo and we'll find each food and check it against your limits.
+            </Text>
           </View>
-        </View>
-
-        {/* ── Scan mode ──────────────────────────────── */}
-        {active === "scan" && (
-          <View className="bg-card rounded-2xl border border-border p-4">
-            {!modelReady && (
-              <View className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-3">
-                <Text className="text-xs text-amber-800">
-                  On-device model not loaded. Will fall back to API detection.
-                  For offline use, place your TFLite model at
-                  assets/models/food_detect.tflite and build a custom dev
-                  client.
-                </Text>
-              </View>
-            )}
-            <Button onPress={openCamera} className="mb-3">
-              <View className="flex-row items-center">
-                <Camera size={20} color="#FFFFFF" />
-                <Text className="text-primary-foreground font-semibold ml-2">
-                  Open Camera
-                </Text>
-              </View>
-            </Button>
-            <Button variant="outline" onPress={pickFromGallery}>
-              <View className="flex-row items-center">
-                <ImageIcon size={20} color="#181F29" />
-                <Text className="text-foreground font-semibold ml-2">
-                  Upload from Gallery
-                </Text>
-              </View>
-            </Button>
+          {!modelReady && (
+            <Banner
+              tone="caution"
+              title="Scanning needs internet"
+              message="The offline food scanner isn't available on this device, so photos will be checked online instead."
+            />
+          )}
+          <Button onPress={openCamera} icon={Camera} className="mb-4">
+            Take a photo
+          </Button>
+          <Button variant="outline" onPress={pickFromGallery} icon={ImageIcon}>
+            Choose from gallery
+          </Button>
+          <View className="flex-row items-center mt-6">
+            <Sun size={20} color={colors.mutedForeground} />
+            <Text className="flex-1 text-caption text-muted-foreground ml-2">
+              Tip: good light and a photo from above give the best results.
+            </Text>
           </View>
-        )}
+        </Card>
+      )}
 
-        {/* ── Manual mode ────────────────────────────── */}
-        {active === "manual" && (
-          <View className="bg-card rounded-2xl border border-border p-4">
-            <View className="flex-row items-center bg-muted rounded-xl border border-border px-3 mb-3">
-              <Search size={16} color="#9CA3AF" />
-              <TextInput
-                value={query}
-                onChangeText={searchFood}
-                placeholder="Search Malaysian foods..."
-                placeholderTextColor="#9CA3AF"
-                className="flex-1 h-12 ml-2 text-sm text-foreground"
-                returnKeyType="search"
+      {/* ── Manual mode ────────────────────────────── */}
+      {active === "manual" && (
+        <Card>
+          <View className="flex-row items-center bg-card rounded-sm border border-input pl-4 mb-4">
+            <Search size={20} color={colors.mutedForeground} />
+            <TextInput
+              value={query}
+              onChangeText={searchFood}
+              placeholder="Type a food, e.g. nasi"
+              placeholderTextColor={colors.mutedForeground}
+              selectionColor={colors.primary}
+              accessibilityLabel="Search foods"
+              className="flex-1 min-h-[52px] px-3 text-body text-foreground"
+              returnKeyType="search"
+            />
+            {query.length > 0 && (
+              <IconButton
+                icon={X}
+                accessibilityLabel="Clear search"
+                onPress={() => {
+                  setQuery("");
+                  setResults([]);
+                }}
               />
-              {query.length > 0 && (
-                <Pressable
-                  onPress={() => {
-                    setQuery("");
-                    setResults([]);
-                  }}
-                >
-                  <X size={16} color="#9CA3AF" />
-                </Pressable>
-              )}
-            </View>
+            )}
+          </View>
 
-            {results.length > 0 && (
-              <View>
-                <Text className="text-xs font-semibold text-muted-foreground uppercase mb-2">
-                  Results
-                </Text>
-                {results.map((item, i) => (
+          {query.trim().length < 2 && (
+            <View>
+              <Text className="text-caption font-bold text-muted-foreground mb-2">
+                Popular foods
+              </Text>
+              <View className="flex-row flex-wrap">
+                {POPULAR_SEARCHES.map((name) => (
                   <Pressable
-                    key={i}
-                    onPress={() => addToCart(item)}
-                    className="flex-row items-center justify-between bg-muted/50 rounded-lg px-3 py-2.5 mb-1.5 active:bg-muted"
+                    key={name}
+                    onPress={() => searchFood(name)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Search for ${name}`}
+                    className="min-h-touch px-4 mr-2 mb-2 rounded-full bg-muted items-center justify-center active:opacity-70"
                   >
-                    <View className="flex-1">
-                      <Text className="text-sm font-medium text-foreground">
-                        {item.name}
-                      </Text>
-                      <Text className="text-xs text-muted-foreground">
-                        {Math.round(item.portion_g)}g ·{" "}
-                        {Math.round(item.calories)} kcal
-                      </Text>
-                    </View>
-                    <Plus size={18} color="#2783A6" />
+                    <Text className="text-body text-foreground">{name}</Text>
                   </Pressable>
                 ))}
               </View>
-            )}
+            </View>
+          )}
 
-            {query.length >= 2 && results.length === 0 && (
-              <Text className="text-xs text-muted-foreground text-center py-4">
+          {results.length > 0 && (
+            <View>
+              <Text className="text-caption font-bold text-muted-foreground mb-2">
+                {results.length} result{results.length > 1 ? "s" : ""} — tap to add
+              </Text>
+              {results.map((item, i) => (
+                <Pressable
+                  key={i}
+                  onPress={() => {
+                    addToCart(item);
+                    toast(`Added ${item.name}`, "info");
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Add ${item.name}, ${Math.round(item.portion_g)} grams, ${Math.round(item.calories)} calories`}
+                  className="flex-row items-center bg-muted rounded-sm px-4 py-3 mb-2 active:opacity-70"
+                >
+                  <View className="flex-1">
+                    <Text className="text-body font-bold text-foreground">{item.name}</Text>
+                    <Text className="text-caption text-muted-foreground">
+                      {Math.round(item.portion_g)} g · {Math.round(item.calories)} kcal
+                    </Text>
+                  </View>
+                  <View className="h-12 px-4 rounded-full bg-primary flex-row items-center">
+                    <Plus size={20} color={colors.primaryForeground} strokeWidth={2.5} />
+                    <Text className="text-caption font-bold text-primary-foreground ml-1">
+                      Add
+                    </Text>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          )}
+
+          {query.trim().length >= 2 && results.length === 0 && (
+            <View className="items-center py-6">
+              <SearchX size={28} color={colors.mutedForeground} />
+              <Text className="text-body font-bold text-foreground mt-2 text-center">
                 No foods found for "{query}"
               </Text>
-            )}
-          </View>
-        )}
-
-        {/* ── Cart ───────────────────────────────────── */}
-        {cart.length > 0 && (
-          <View className="bg-card rounded-2xl border border-border p-4 mt-4">
-            <View className="flex-row items-center justify-between mb-3">
-              <Text className="text-sm font-bold text-foreground">
-                Your Meal
-              </Text>
-              <Text className="text-xs font-semibold text-muted-foreground">
-                {Math.round(cartTotal)} kcal
+              <Text className="text-caption text-muted-foreground mt-1 text-center">
+                Try a shorter or different name, like "rice" or "egg".
               </Text>
             </View>
+          )}
+        </Card>
+      )}
 
-            {cart.map((item) => (
-              <View
-                key={item.id}
-                className="bg-muted/40 rounded-xl px-3 py-3 mb-2 border border-border/50"
-              >
-                <View className="flex-row items-center justify-between mb-2">
-                  <Text className="text-sm font-semibold text-foreground flex-1">
-                    {item.name}
-                  </Text>
-                  <Pressable
-                    onPress={() => removeFromCart(item.id)}
-                    className="ml-2"
-                  >
-                    <Trash2 size={16} color="#DC2626" />
-                  </Pressable>
-                </View>
-                <View className="flex-row items-center justify-between">
-                  <View className="flex-row items-center">
-                    <Pressable
-                      onPress={() => adjustPortion(item.id, -5)}
-                      className="h-8 w-8 bg-muted rounded-lg items-center justify-center"
-                    >
-                      <Minus size={14} color="#6B7280" />
-                    </Pressable>
-                    <Text className="text-sm font-medium text-foreground mx-2 min-w-[44px] text-center">
-                      {Math.round(item.portion_g)}g
-                    </Text>
-                    <Pressable
-                      onPress={() => adjustPortion(item.id, 5)}
-                      className="h-8 w-8 bg-muted rounded-lg items-center justify-center"
-                    >
-                      <Plus size={14} color="#6B7280" />
-                    </Pressable>
-                  </View>
-                  <View className="flex-row items-center">
-                    <Pressable
-                      onPress={() => adjustQuantity(item.id, -1)}
-                      className="h-8 w-8 bg-muted rounded-lg items-center justify-center"
-                    >
-                      <Minus size={14} color="#6B7280" />
-                    </Pressable>
-                    <Text className="text-sm font-medium text-foreground mx-2 min-w-[32px] text-center">
-                      ×{item.quantity}
-                    </Text>
-                    <Pressable
-                      onPress={() => adjustQuantity(item.id, 1)}
-                      className="h-8 w-8 bg-muted rounded-lg items-center justify-center"
-                    >
-                      <Plus size={14} color="#6B7280" />
-                    </Pressable>
-                  </View>
-                  <Text className="text-xs text-muted-foreground">
+      {/* ── Cart ───────────────────────────────────── */}
+      {cart.length > 0 && (
+        <Card className="mt-4">
+          <SectionTitle
+            icon={Utensils}
+            title="Your meal"
+            action={
+              <Text className="text-body font-bold text-foreground">
+                {Math.round(cartTotal)} kcal
+              </Text>
+            }
+          />
+
+          {cart.map((item) => (
+            <View key={item.id} className="border-t border-border pt-4 mb-4">
+              <View className="flex-row items-center mb-2">
+                <View className="flex-1">
+                  <Text className="text-body font-bold text-foreground">{item.name}</Text>
+                  <Text className="text-caption text-muted-foreground">
                     {Math.round(item.calories * item.quantity)} kcal
                   </Text>
                 </View>
+                <IconButton
+                  icon={Trash2}
+                  tone="danger"
+                  accessibilityLabel={`Remove ${item.name}`}
+                  onPress={() => removeFromCart(item.id)}
+                />
               </View>
-            ))}
-
-            <Button
-              onPress={submitMeal}
-              loading={submitting}
-              className="mt-2"
-            >
-              <View className="flex-row items-center">
-                <Check size={18} color="#FFFFFF" />
-                <Text className="text-primary-foreground font-semibold ml-2">
-                  Log Meal ({cart.length} item{cart.length > 1 ? "s" : ""})
-                </Text>
+              <View className="flex-row">
+                <View className="flex-1 mr-2">
+                  <Stepper
+                    label="Portion"
+                    value={`${Math.round(item.portion_g)} g`}
+                    onMinus={() => adjustPortion(item.id, -5)}
+                    onPlus={() => adjustPortion(item.id, 5)}
+                  />
+                </View>
+                <View className="flex-1 ml-2">
+                  <Stepper
+                    label="Servings"
+                    value={`×${item.quantity}`}
+                    onMinus={() => adjustQuantity(item.id, -1)}
+                    onPlus={() => adjustQuantity(item.id, 1)}
+                  />
+                </View>
               </View>
-            </Button>
-          </View>
-        )}
-      </ScrollView>
-    </SafeAreaView>
+            </View>
+          ))}
+        </Card>
+      )}
+    </Screen>
   );
 }
 
-/* ── Styles ──────────────────────────────────────────── */
+/* ── Styles (camera sits on a live photo, so it uses fixed colours) ── */
 
 const styles = StyleSheet.create({
-  cameraContainer: { flex: 1, backgroundColor: "#000" },
+  cameraContainer: { flex: 1, backgroundColor: tokens.fixed.black },
   cameraPreview: {
     width: SCREEN_W,
     height: SCREEN_H,
@@ -1093,23 +1042,41 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingBottom: 16,
+    backgroundColor: tokens.fixed.scrimLight,
   },
   topTitle: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "700",
-    textShadowColor: "rgba(0,0,0,0.5)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
+    color: tokens.fixed.white,
+    fontSize: tokens.fontSize.title[0],
+    fontWeight: tokens.fontWeight.bold,
   },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(0,0,0,0.35)",
+  roundBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: tokens.fixed.scrim,
     alignItems: "center",
     justifyContent: "center",
+  },
+  detectingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: tokens.fixed.scrim,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 32,
+  },
+  detectingTitle: {
+    color: tokens.fixed.white,
+    fontSize: tokens.fontSize.title[0],
+    fontWeight: tokens.fontWeight.bold,
+    textAlign: "center",
+    marginTop: 24,
+  },
+  detectingHint: {
+    color: tokens.fixed.white,
+    fontSize: tokens.fontSize.body[0],
+    textAlign: "center",
+    marginTop: 8,
   },
   bottomBar: {
     position: "absolute",
@@ -1117,28 +1084,41 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     paddingHorizontal: 24,
-    paddingTop: 20,
-    backgroundColor: "rgba(0,0,0,0.3)",
+    paddingTop: 16,
+    backgroundColor: tokens.fixed.scrim,
+  },
+  cameraHint: {
+    color: tokens.fixed.white,
+    fontSize: tokens.fontSize.body[0],
+    textAlign: "center",
+    marginBottom: 16,
   },
   captureRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
+  sideBtn: { width: 72, alignItems: "center" },
+  sideBtnText: {
+    color: tokens.fixed.white,
+    fontSize: tokens.fontSize.caption[0],
+    fontWeight: tokens.fontWeight.bold,
+    marginTop: 4,
+  },
   captureBtn: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     borderWidth: 4,
-    borderColor: "#FFFFFF",
+    borderColor: tokens.fixed.white,
     alignItems: "center",
     justifyContent: "center",
   },
   captureInner: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: "#FFFFFF",
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: tokens.fixed.white,
   },
   freezeControls: {
     flexDirection: "row",
@@ -1146,34 +1126,40 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   freezeBtn: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.5)",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderRadius: 16,
+    justifyContent: "center",
+    backgroundColor: tokens.fixed.scrim,
+    borderWidth: 2,
+    borderColor: tokens.fixed.white,
+    minHeight: 56,
+    borderRadius: tokens.radius.md,
     gap: 8,
   },
-  useBtn: { backgroundColor: "#1A7A55" },
-  freezeBtnText: { color: "#FFFFFF", fontSize: 15, fontWeight: "600" },
+  freezeBtnText: {
+    color: tokens.fixed.white,
+    fontSize: tokens.fontSize.body[0],
+    fontWeight: tokens.fontWeight.bold,
+  },
 
   // Bounding box overlay styles
   bbox: {
     position: "absolute",
-    borderWidth: 2,
+    borderWidth: 3,
     borderRadius: 6,
   },
   bboxLabel: {
     position: "absolute",
-    paddingHorizontal: 6,
-    paddingVertical: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
     borderRadius: 4,
     alignSelf: "flex-start",
   },
   bboxLabelText: {
-    color: "#FFF",
-    fontSize: 10,
-    fontWeight: "700",
+    color: tokens.fixed.white,
+    fontSize: tokens.fontSize.caption[0],
+    fontWeight: tokens.fontWeight.bold,
     flexShrink: 0,
   },
 });

@@ -13,4 +13,6 @@ config.resolver.blockList = exclusionList([
 // Bundle .tflite model files as assets
 config.resolver.assetExts = [...(config.resolver.assetExts ?? []), "tflite"];
 
-module.exports = withNativeWind(config, { input: "./global.css" });
+// inlineRem: false keeps `rem` as a live unit so the in-app Text size setting
+// (lib/theme.tsx → rem.set) can scale text and spacing at runtime.
+module.exports = withNativeWind(config, { input: "./global.css", inlineRem: false });

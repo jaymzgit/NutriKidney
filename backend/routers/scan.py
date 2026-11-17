@@ -54,6 +54,35 @@ class DetectResponse(BaseModel):
 
 UNKNOWN_FOOD_PORTION_G = 150
 
+# Portion estimation from bounding-box area.
+# Mirrors app/(tabs)/scan.tsx so the API-fallback path and the on-device path
+# produce the same numbers for the same photo. See PLAN-portion-estimation.md —
+# this constant-based heuristic is what Phase 1 (plate normalization) replaces;
+# until then both paths must at least agree.
+REFERENCE_AREA_FRACTION = 0.12
+MIN_PORTION_SCALE = 0.5
+MAX_PORTION_SCALE = 2.0
+
+
+def portion_scale(pred) -> float:
+    """Bbox area → multiplier of the food's default portion.
+
+    Roboflow returns x/y as the box CENTER plus width/height, all normalized
+    to [0,1], so w*h is already the image-area fraction. Missing or invalid
+    geometry (classification-style responses, bare class-name strings) → 1.0.
+    """
+    if not isinstance(pred, dict):
+        return 1.0
+    try:
+        bw = float(pred.get("width") or 0)
+        bh = float(pred.get("height") or 0)
+    except (TypeError, ValueError):
+        return 1.0
+    if bw <= 0 or bh <= 0:
+        return 1.0
+    scale = (bw * bh) / REFERENCE_AREA_FRACTION
+    return max(MIN_PORTION_SCALE, min(MAX_PORTION_SCALE, scale))
+
 # ── POST /scan/detect ───────────────────────────────
 
 @router.post("/detect", response_model=DetectResponse)
@@ -89,39 +118,57 @@ async def detect_food(file: UploadFile = File(...)):
 
     raw_predictions = predictions if isinstance(predictions, list) else []
 
-    # Deduplicate by class name, keep highest confidence
+    # One item per detection — do NOT dedupe by class: two servings of rice
+    # are two portions (same fix as lib/yolo.ts). Roboflow runs NMS
+    # server-side, so remaining rows are distinct physical foods.
+    items: list[DetectedItem] = []
     seen: dict[str, float] = {}
     for pred in raw_predictions:
-        cls = pred.get("class", "")
-        conf = pred.get("confidence", 0)
-        if cls and (cls not in seen or conf > seen[cls]):
-            seen[cls] = conf
+        if isinstance(pred, str):
+            # predicted_classes returns bare class-name strings
+            class_name, conf = pred, 0.5
+        elif isinstance(pred, dict):
+            class_name = str(pred.get("class", "") or "")
+            conf = float(pred.get("confidence", 0) or 0)
+        else:
+            continue
+        if not class_name:
+            continue
+        if class_name in seen:
+            # Same class again — keep only if clearly a different instance
+            # (we can't tell instances apart without box geometry); skip
+            # duplicates with near-identical confidence to avoid double-count.
+            if abs(conf - seen[class_name]) < 0.05:
+                continue
+        seen[class_name] = conf
 
-    items: list[DetectedItem] = []
-    for class_name, conf in seen.items():
+        # Same heuristic as the on-device path (see portion_scale above).
+        scale = portion_scale(pred)
+
         # Cross-reference against food database
         matches = fuzzy_match(class_name, threshold=0.35)
 
         if matches:
             food, match_conf = matches[0]
-            entry = {**food}  # Use food's own default portion from DB
+            base_portion = float(food.get("portion_g") or 0) or 1.0
             items.append(DetectedItem(
-                name=entry["name"],
-                portion_g=entry["portion_g"],
-                calories=entry["calories"],
-                potassium_mg=entry["potassium_mg"],
-                phosphorus_mg=entry["phosphorus_mg"],
-                sodium_mg=entry["sodium_mg"],
-                protein_g=entry["protein_g"],
-                carbs_g=entry["carbs_g"],
-                fat_g=entry["fat_g"],
+                name=food["name"],
+                portion_g=round(base_portion * scale, 1),
+                calories=round(food["calories"] * scale, 1),
+                potassium_mg=round(food["potassium_mg"] * scale, 1),
+                phosphorus_mg=round(food["phosphorus_mg"] * scale, 1),
+                sodium_mg=round(food["sodium_mg"] * scale, 1),
+                protein_g=round(food["protein_g"] * scale, 1),
+                carbs_g=round(food["carbs_g"] * scale, 1),
+                fat_g=round(food["fat_g"] * scale, 1),
                 confidence=round(conf * match_conf, 2),
             ))
         else:
-            # Detected but not in local DB — return with zero nutrients
+            # Detected but not in local DB — zero nutrients, scaled portion.
+            # The app flags these (calories === 0) for manual correction.
             items.append(DetectedItem(
                 name=class_name.replace("-", " ").replace("_", " ").title(),
-                portion_g=UNKNOWN_FOOD_PORTION_G,
+                portion_g=round(UNKNOWN_FOOD_PORTION_G * scale, 1),
                 calories=0,
                 potassium_mg=0,
                 phosphorus_mg=0,

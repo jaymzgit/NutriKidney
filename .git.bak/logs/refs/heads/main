@@ -1,0 +1,3 @@
+0000000000000000000000000000000000000000 e1385bd5a5af6e64e3fb6344afb595f6b37495b6 James Khor <jaymz@cachyos-x8664.(none)> 1790005590 +0800	clone: from https://github.com/jaymzgit/NutriKidney
+e1385bd5a5af6e64e3fb6344afb595f6b37495b6 6f835940249aca83c7480602e9dbc9614afce2bb James <jameskhor6@gmail.com> 1793546267 +0800	commit: feat: add design system components + theme tokens
+6f835940249aca83c7480602e9dbc9614afce2bb 8fc8f910d47be39056c731b2fa00a9f5ef527bb4 James <jameskhor6@gmail.com> 1793546442 +0800	commit: feat: add RAG CKD chatbot backend (pgvector + fastembed + free-tier LLM)

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { useFocusEffect } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Alert, Pressable, Text, View } from "react-native";
+import { useFocusEffect, useRouter } from "expo-router";
 import Svg, {
   Circle as SvgCircle,
   G,
@@ -12,20 +11,38 @@ import Svg, {
 import {
   Activity,
   Calendar,
+  FlaskConical,
   Heart,
   Leaf,
   LogOut,
+  Monitor,
+  Moon,
+  Palette as PaletteIcon,
+  Save,
   Scale,
   ShieldAlert,
   Stethoscope,
+  Sun,
   TrendingUp,
-  User,
+  Users,
   Zap,
 } from "lucide-react-native";
 import Button from "@/components/Button";
 import ScrollPicker from "@/components/ScrollPicker";
+import Screen from "@/components/Screen";
+import ScreenHeader from "@/components/ScreenHeader";
+import Card from "@/components/Card";
+import SectionTitle from "@/components/SectionTitle";
+import Chip from "@/components/Chip";
+import SegmentedControl from "@/components/SegmentedControl";
+import TextField from "@/components/TextField";
+import ListRow from "@/components/ListRow";
+import Banner from "@/components/Banner";
+import { useToast } from "@/components/Toast";
 import { useAuth } from "@/lib/AuthContext";
 import { supabase } from "@/lib/supabase";
+import { tokens, useTheme } from "@/lib/theme";
+import type { Palette, ThemePreference } from "@/lib/theme";
 
 type WeightEntry = { id: string; weight_kg: number; recorded_at: string };
 
@@ -49,11 +66,11 @@ const CKD_STAGES = [
 ];
 
 const CKD_STAGE_DESCRIPTIONS: Record<string, string> = {
-  "1": "Normal GFR (\u226590)",
-  "2": "Mild decrease (60\u201389)",
-  "3a": "Mild-moderate (45\u201359)",
-  "3b": "Moderate-severe (30\u201344)",
-  "4": "Severe decrease (15\u201329)",
+  "1": "Normal GFR (≥90)",
+  "2": "Mild decrease (60–89)",
+  "3a": "Mild-moderate (45–59)",
+  "3b": "Moderate-severe (30–44)",
+  "4": "Severe decrease (15–29)",
   "5": "Kidney failure (<15)",
 };
 
@@ -81,52 +98,43 @@ const DIETARY_PREFERENCES = [
   { value: "pescatarian", label: "Pescatarian" },
 ];
 
-/* ── Shared UI helpers ─────────────────────────────── */
-
-function SectionHeader({ icon: Icon, label }: { icon: any; label: string }) {
-  return (
-    <View className="flex-row items-center mb-4">
-      <Icon size={16} color="#1A7A55" />
-      <Text className="text-sm font-bold text-foreground ml-2">{label}</Text>
-    </View>
-  );
-}
-
-function TogglePill({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      className={`px-4 py-2.5 rounded-lg border mr-2 mb-2 ${active ? "border-primary bg-primary/5" : "border-border bg-muted"}`}
-    >
-      <Text className={`text-sm ${active ? "text-primary font-semibold" : "text-foreground"}`}>{label}</Text>
-    </Pressable>
-  );
-}
+const THEME_OPTIONS: { value: ThemePreference; label: string; icon: typeof Sun }[] = [
+  { value: "system", label: "Auto", icon: Monitor },
+  { value: "light", label: "Light", icon: Sun },
+  { value: "dark", label: "Dark", icon: Moon },
+];
 
 /* ── Weight chart (SVG) ────────────────────────────── */
 
 function WeightChart({
   data,
   width,
+  colors,
+  textScale,
   onPointPress,
 }: {
   data: WeightEntry[];
   width: number;
+  colors: Palette;
+  textScale: number;
   onPointPress: (entry: WeightEntry) => void;
 }) {
   if (data.length < 2) {
     return (
       <View className="items-center py-6">
-        <Scale size={24} color="#9CA3AF" />
-        <Text className="text-xs text-muted-foreground mt-2">
-          {data.length === 0 ? "No weight data yet" : "Log weight again to see trends"}
+        <Scale size={28} color={colors.mutedForeground} />
+        <Text className="text-body text-muted-foreground mt-2 text-center">
+          {data.length === 0
+            ? "No weight data yet. Change your weight below to start tracking."
+            : "Log your weight again to see a trend."}
         </Text>
       </View>
     );
   }
 
-  const H = 160;
-  const PAD = { top: 12, right: 12, bottom: 24, left: 36 };
+  const H = 200;
+  const LABEL = (tokens.fontSize.caption[0] - 2) * textScale;
+  const PAD = { top: 16, right: 16, bottom: 28, left: 40 };
   const cw = width - PAD.left - PAD.right;
   const ch = H - PAD.top - PAD.bottom;
 
@@ -146,7 +154,7 @@ function WeightChart({
   const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${(PAD.top + ch).toFixed(1)} L ${points[0].x.toFixed(1)} ${(PAD.top + ch).toFixed(1)} Z`;
 
   const gridCount = 4;
-  const maxXLabels = 5;
+  const maxXLabels = 4;
   const xInterval = Math.max(1, Math.ceil(data.length / maxXLabels));
 
   return (
@@ -158,32 +166,28 @@ function WeightChart({
         const val = (minW + t * range).toFixed(0);
         return (
           <G key={`g${i}`}>
-            <SvgLine x1={PAD.left} y1={y} x2={width - PAD.right} y2={y} stroke="#E5E7EB" strokeWidth={0.5} />
-            <SvgText x={PAD.left - 6} y={y + 3} fontSize={9} fill="#9CA3AF" textAnchor="end">
+            <SvgLine x1={PAD.left} y1={y} x2={width - PAD.right} y2={y} stroke={colors.border} strokeWidth={1} />
+            <SvgText x={PAD.left - 8} y={y + 4} fontSize={LABEL} fill={colors.mutedForeground} textAnchor="end">
               {val}
             </SvgText>
           </G>
         );
       })}
       {/* Area fill */}
-      <Path d={areaPath} fill="#1A7A55" fillOpacity={0.08} />
+      <Path d={areaPath} fill={colors.primary} fillOpacity={0.12} />
       {/* Line */}
-      <Path d={linePath} fill="none" stroke="#1A7A55" strokeWidth={2} strokeLinejoin="round" />
-      {/* Dots — wider transparent hit area + visible inner dot */}
+      <Path d={linePath} fill="none" stroke={colors.primary} strokeWidth={3} strokeLinejoin="round" />
+      {/* Dots — wide transparent hit area + visible inner dot */}
       {points.map((p, i) => (
         <G key={`d${i}`}>
+          <SvgCircle cx={p.x} cy={p.y} r={22} fill="transparent" onPress={() => onPointPress(data[i])} />
           <SvgCircle
             cx={p.x}
             cy={p.y}
-            r={14}
-            fill="transparent"
-            onPress={() => onPointPress(data[i])}
-          />
-          <SvgCircle
-            cx={p.x}
-            cy={p.y}
-            r={4}
-            fill="#1A7A55"
+            r={6}
+            fill={colors.primary}
+            stroke={colors.card}
+            strokeWidth={2}
             onPress={() => onPointPress(data[i])}
           />
         </G>
@@ -196,7 +200,7 @@ function WeightChart({
           month: "short",
         });
         return (
-          <SvgText key={`x${i}`} x={points[i].x} y={H - 4} fontSize={8} fill="#9CA3AF" textAnchor="middle">
+          <SvgText key={`x${i}`} x={points[i].x} y={H - 6} fontSize={LABEL} fill={colors.mutedForeground} textAnchor="middle">
             {label}
           </SvgText>
         );
@@ -209,6 +213,9 @@ function WeightChart({
 
 export default function Profile() {
   const { user, updateProfile, logout } = useAuth();
+  const { colors, preference, setPreference, textScale, setTextScale } = useTheme();
+  const toast = useToast();
+  const router = useRouter();
 
   const [ckdStage, setCkdStage] = useState<string | null>(user?.ckd_stage ?? null);
   const [weight, setWeight] = useState(user?.weight_kg ? String(user.weight_kg) : "");
@@ -234,16 +241,26 @@ export default function Profile() {
   const lastSavedBasics = useRef<{ w: string; h: string; a: string } | null>(
     null
   );
+  // One-shot guard: set right before a programmatic weight change (deleting
+  // the latest history point) so the autosave effect doesn't re-insert a
+  // duplicate weight_history row for the value that code just wrote.
+  const suppressHistoryInsert = useRef(false);
 
-  const fetchWeightHistory = useCallback(async () => {
-    if (!user) return;
+  // Returns entries ascending (oldest first) so callers can read the latest
+  // one after a mutation. Fetches newest-first, then reverses: with >60
+  // entries, the old ascending+limit kept the OLDEST 60 and the chart
+  // silently dropped recent weights.
+  const fetchWeightHistory = useCallback(async (): Promise<WeightEntry[]> => {
+    if (!user) return [];
     const { data } = await supabase
       .from("weight_history")
       .select("id, weight_kg, recorded_at")
       .eq("user_id", user.id)
-      .order("recorded_at", { ascending: true })
+      .order("recorded_at", { ascending: false })
       .limit(60);
-    if (data) setWeightHistory(data);
+    const entries: WeightEntry[] = data ? [...data].reverse() : [];
+    setWeightHistory(entries);
+    return entries;
   }, [user]);
 
   // Reset form to user values on focus (reverts unsaved changes on re-enter)
@@ -270,6 +287,10 @@ export default function Profile() {
   // Auto-save weight/height/age (debounced 800ms after last change)
   useEffect(() => {
     if (!user) return;
+    // One-shot: consumed on every run so a programmatic weight change (see
+    // handleDeleteWeight) suppresses exactly one history insert, then clears.
+    const suppressed = suppressHistoryInsert.current;
+    suppressHistoryInsert.current = false;
     const key = { w: weight, h: height, a: age };
     // Skip initial sync from user values
     if (lastSavedBasics.current === null) {
@@ -295,8 +316,9 @@ export default function Profile() {
           height_cm: height ? Number(height) : null,
           age: age ? Number(age) : null,
         });
-        // Insert weight_history only if weight actually changed
-        if (weight && weight !== prevW) {
+        // Insert weight_history only if weight actually changed (and this
+        // change wasn't initiated by the delete handler)
+        if (weight && weight !== prevW && !suppressed) {
           const { error: whErr } = await supabase
             .from("weight_history")
             .insert({ user_id: user.id, weight_kg: Number(weight) });
@@ -331,7 +353,7 @@ export default function Profile() {
         diagnosis_date: diagnosisDate || null,
       });
 
-      Alert.alert("Saved", "Profile updated successfully");
+      toast("Profile saved");
     } catch (err: any) {
       Alert.alert("Error", err?.message || "Failed to save");
     } finally {
@@ -351,6 +373,12 @@ export default function Profile() {
             text: "Delete",
             style: "destructive",
             onPress: async () => {
+              const ts = (s: string) => new Date(s).getTime();
+              // Deleting a point that isn't the newest only changes the chart.
+              const wasLatest = !weightHistory.some(
+                (e) => ts(e.recorded_at) > ts(entry.recorded_at)
+              );
+
               const { error } = await supabase
                 .from("weight_history")
                 .delete()
@@ -359,13 +387,48 @@ export default function Profile() {
                 Alert.alert("Error", error.message);
                 return;
               }
-              await fetchWeightHistory();
+              const remaining = await fetchWeightHistory();
+              if (!wasLatest) return;
+
+              // The newest point is gone — fall the profile weight back to the
+              // new newest entry (or clear it when history is now empty),
+              // otherwise the dashboard keeps using the deleted value.
+              const newLatest = remaining[remaining.length - 1] ?? null;
+              const nextW = newLatest ? String(newLatest.weight_kg) : "";
+
+              // Drop any pending autosave — it captured the old weight and
+              // would write it straight back.
+              if (autoSaveTimer.current) {
+                clearTimeout(autoSaveTimer.current);
+                autoSaveTimer.current = null;
+              }
+
+              // Sync the autosave baseline + suppress the history insert so
+              // the autosave effect doesn't re-create the deleted row.
+              suppressHistoryInsert.current = true;
+              lastSavedBasics.current = { w: nextW, h: height, a: age };
+
+              setWeight(nextW);
+              try {
+                // Include height/age: clearing the pending timer above would
+                // otherwise drop an in-flight edit to those fields.
+                await updateProfile({
+                  weight_kg: newLatest ? newLatest.weight_kg : null,
+                  height_cm: height ? Number(height) : null,
+                  age: age ? Number(age) : null,
+                });
+              } catch (e: any) {
+                console.log(
+                  "[weight_history] profile sync after delete failed:",
+                  e?.message
+                );
+              }
             },
           },
         ]
       );
     },
-    [user, fetchWeightHistory]
+    [user, weightHistory, fetchWeightHistory, height, age, updateProfile]
   );
 
   const handleLogout = () => {
@@ -384,288 +447,317 @@ export default function Profile() {
         weightHistory[weightHistory.length - 2].weight_kg
       : null;
 
+  const suggestedStage = latestEgfr ? stageFromEgfr(Number(latestEgfr)) : null;
+
   return (
-    <SafeAreaView className="flex-1 bg-background" edges={["top"]}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 24 }} className="px-4 pt-2">
-        <View className="flex-row items-center mb-6">
-          <User size={20} color="#1A7A55" />
-          <Text className="text-lg font-bold text-foreground ml-3">Profile</Text>
-        </View>
-
-        {/* User card */}
-        <View className="bg-card rounded-xl border border-border p-4 mb-5">
-          <View className="flex-row items-center">
-            <View className="h-14 w-14 rounded-full bg-primary/10 items-center justify-center">
-              <Text className="text-xl font-bold text-primary">{initial}</Text>
-            </View>
-            <View className="ml-4">
-              <Text className="text-base font-bold text-foreground">
-                {user?.full_name || "User"}
-              </Text>
-              <Text className="text-xs text-muted-foreground">{user?.email}</Text>
-            </View>
+    <Screen header={<ScreenHeader title="Profile" />}>
+      {/* User card */}
+      <Card className="mb-4">
+        <View className="flex-row items-center">
+          <View className="h-14 w-14 rounded-full bg-primary-soft items-center justify-center">
+            <Text className="text-title font-bold text-primary">{initial}</Text>
+          </View>
+          <View className="ml-4 flex-1">
+            <Text className="text-title font-bold text-foreground">
+              {user?.full_name || "User"}
+            </Text>
+            <Text className="text-caption text-muted-foreground" numberOfLines={1}>
+              {user?.email}
+            </Text>
           </View>
         </View>
+      </Card>
 
-        {/* Weight History Graph */}
-        <View className="bg-card rounded-xl border border-border p-4 mb-5">
-          <View className="flex-row items-center justify-between mb-2">
-            <View className="flex-row items-center">
-              <SectionHeader icon={TrendingUp} label="Weight History" />
-              {autoSaving && (
-                <Text className="text-[10px] text-muted-foreground ml-2 mb-3">
-                  Saving…
-                </Text>
-              )}
-            </View>
-            {weight ? (
-              <View className="flex-row items-baseline">
-                <Text className="text-lg font-bold text-foreground">{weight}</Text>
-                <Text className="text-xs text-muted-foreground ml-1">kg</Text>
-                {weightDelta != null && weightDelta !== 0 && (
-                  <Text
-                    className={`text-xs font-medium ml-2 ${
-                      weightDelta > 0 ? "text-amber-600" : "text-primary"
-                    }`}
-                  >
-                    {weightDelta > 0 ? "+" : ""}
-                    {weightDelta.toFixed(1)}
-                  </Text>
-                )}
-              </View>
-            ) : null}
-          </View>
-          <View onLayout={(e) => setChartWidth(e.nativeEvent.layout.width)}>
-            {chartWidth > 0 && (
-              <WeightChart
-                data={weightHistory}
-                width={chartWidth}
-                onPointPress={handleDeleteWeight}
-              />
-            )}
-            {weightHistory.length >= 2 && (
-              <Text className="text-[10px] text-muted-foreground text-center mt-1">
-                Tap a point to delete that entry
-              </Text>
-            )}
-          </View>
-        </View>
+      {/* Display */}
+      <Card className="mb-4">
+        <SectionTitle icon={PaletteIcon} title="Display" />
+        <Text className="text-caption font-bold text-muted-foreground mb-2">Theme</Text>
+        <SegmentedControl options={THEME_OPTIONS} value={preference} onChange={setPreference} />
+        <Text className="text-caption text-muted-foreground mt-2">
+          {preference === "system"
+            ? "Follows your phone's light or dark setting."
+            : preference === "dark"
+            ? "Dark background — easier on the eyes at night."
+            : "Light background — best in bright rooms."}
+        </Text>
 
-        {/* CKD Stage */}
-        <View className="bg-card rounded-xl border border-border p-4 mb-5">
-          <SectionHeader icon={Heart} label="CKD Stage" />
-          <View className="flex-row flex-wrap -mx-1 mb-1">
-            {CKD_STAGES.map(({ value, label }) => {
-              const suggested = latestEgfr ? stageFromEgfr(Number(latestEgfr)) : null;
-              const isSuggested = suggested === value && ckdStage !== value;
-              return (
-                <Pressable
-                  key={value}
-                  onPress={() => setCkdStage(value)}
-                  className={`px-3.5 py-2 rounded-lg border mx-1 mb-2 ${
-                    ckdStage === value
-                      ? "border-primary bg-primary"
-                      : isSuggested
-                      ? "border-primary border-dashed bg-primary/5"
-                      : "border-border bg-muted"
+        <Text className="text-caption font-bold text-muted-foreground mt-6 mb-2">
+          Text size
+        </Text>
+        <View className="flex-row -mx-1" accessibilityRole="radiogroup">
+          {tokens.textScales.map(({ value, label }, i) => {
+            const selected = textScale === value;
+            return (
+              <Pressable
+                key={value}
+                onPress={() => setTextScale(value)}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: selected }}
+                accessibilityLabel={`${label} text`}
+                className="flex-1 px-1"
+              >
+                <View
+                  className={`min-h-touch rounded-sm border items-center justify-center py-2 ${
+                    selected ? "border-primary bg-primary-soft" : "border-border bg-card"
                   }`}
                 >
                   <Text
-                    className={`text-sm font-semibold ${
-                      ckdStage === value
-                        ? "text-white"
-                        : isSuggested
-                        ? "text-primary"
-                        : "text-foreground"
-                    }`}
+                    style={{
+                      fontSize: 15 + i * 4,
+                      fontWeight: tokens.fontWeight.bold,
+                      color: selected ? colors.primary : colors.foreground,
+                    }}
                   >
-                    {label}
+                    A
                   </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          {ckdStage && CKD_STAGE_DESCRIPTIONS[ckdStage] ? (
-            <Text className="text-xs text-muted-foreground">
-              {CKD_STAGE_DESCRIPTIONS[ckdStage]}
-            </Text>
-          ) : null}
-          {latestEgfr && stageFromEgfr(Number(latestEgfr)) !== ckdStage ? (
-            <Pressable
-              onPress={() => setCkdStage(stageFromEgfr(Number(latestEgfr)))}
-              className="mt-2 bg-primary/5 border border-primary/20 rounded-lg px-3 py-2"
-            >
-              <Text className="text-xs text-primary">
-                Based on eGFR {latestEgfr}, suggested stage is{" "}
-                <Text className="font-bold">
-                  {stageFromEgfr(Number(latestEgfr))}
+                </View>
+                <Text
+                  numberOfLines={1}
+                  className={`text-caption text-center mt-1 ${
+                    selected ? "text-primary font-bold" : "text-muted-foreground"
+                  }`}
+                >
+                  {label}
                 </Text>
-                . Tap to update.
+              </Pressable>
+            );
+          })}
+        </View>
+        <View className="bg-muted rounded-sm p-4 mt-4">
+          <Text className="text-body text-foreground">
+            This is how text will look. Your meals, limits and results will all use this size.
+          </Text>
+        </View>
+      </Card>
+
+      <ListRow
+        icon={FlaskConical}
+        title="Lab reports"
+        subtitle="Scan and keep your blood test results"
+        onPress={() => router.navigate("/(tabs)/lab-reports")}
+        className="mb-4"
+      />
+
+      {/* Weight History Graph */}
+      <Card className="mb-4">
+        <SectionTitle
+          icon={TrendingUp}
+          title="Weight history"
+          action={
+            autoSaving ? (
+              <Text className="text-caption text-muted-foreground">Saving…</Text>
+            ) : undefined
+          }
+        />
+        {weight ? (
+          <View className="flex-row items-baseline mb-2">
+            <Text className="text-display font-bold text-foreground">{weight}</Text>
+            <Text className="text-body text-muted-foreground ml-1">kg</Text>
+            {weightDelta != null && weightDelta !== 0 && (
+              <Text
+                className={`text-body font-bold ml-4 ${
+                  weightDelta > 0 ? "text-caution" : "text-primary"
+                }`}
+              >
+                {weightDelta > 0 ? "▲ +" : "▼ "}
+                {weightDelta.toFixed(1)} kg
               </Text>
-            </Pressable>
-          ) : null}
-        </View>
-
-        {/* Body Measurements */}
-        <View className="bg-card rounded-xl border border-border p-4 mb-5">
-          <SectionHeader icon={Activity} label="Body Measurements" />
-          <View className="flex-row gap-3 mb-3">
-            <View className="flex-1">
-              <ScrollPicker
-                label="Weight"
-                unit="kg"
-                value={weight ? Number(weight) : 60}
-                min={30}
-                max={200}
-                onChange={(v) => setWeight(String(v))}
-              />
-            </View>
-            <View className="flex-1">
-              <ScrollPicker
-                label="Height"
-                unit="cm"
-                value={height ? Number(height) : 165}
-                min={100}
-                max={220}
-                onChange={(v) => setHeight(String(v))}
-              />
-            </View>
+            )}
           </View>
-          <View className="flex-row gap-3">
-            <View className="flex-1">
-              <ScrollPicker
-                label="Age"
-                unit="yrs"
-                value={age ? Number(age) : 30}
-                min={1}
-                max={120}
-                onChange={(v) => setAge(String(v))}
-              />
-            </View>
-            <View className="flex-1 rounded-2xl border border-border bg-muted/50 overflow-hidden">
-              <View className="px-4 pt-3 pb-1">
-                <Text className="text-xs font-medium text-muted-foreground">Gender</Text>
-              </View>
-              <View className="flex-1 justify-center px-3 pb-3 gap-3">
-                {[
-                  { v: "male", label: "Male" },
-                  { v: "female", label: "Female" },
-                ].map(({ v, label }) => (
-                  <Pressable
-                    key={v}
-                    onPress={() => setGender(v)}
-                    className={`flex-1 rounded-lg border flex-row items-center justify-center ${
-                      gender === v ? "border-primary bg-primary/5" : "border-border bg-card"
-                    }`}
-                  >
-                    <Text
-                      className={`text-sm font-bold ${gender === v ? "text-primary" : "text-foreground"}`}
-                    >
-                      {label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
+        ) : null}
+        <View onLayout={(e) => setChartWidth(e.nativeEvent.layout.width)}>
+          {chartWidth > 0 && (
+            <WeightChart
+              data={weightHistory}
+              width={chartWidth}
+              colors={colors}
+              textScale={textScale}
+              onPointPress={handleDeleteWeight}
+            />
+          )}
+          {weightHistory.length >= 2 && (
+            <Text className="text-caption text-muted-foreground text-center mt-2">
+              Tap a point to delete that entry
+            </Text>
+          )}
+        </View>
+      </Card>
+
+      {/* Body Measurements */}
+      <Card className="mb-4">
+        <SectionTitle icon={Activity} title="Body measurements" className="mb-2" />
+        <Text className="text-caption text-muted-foreground mb-4">
+          These save automatically when you change them.
+        </Text>
+        <View className="flex-row mb-4">
+          <View className="flex-1 mr-2">
+            <ScrollPicker
+              label="Weight"
+              unit="kg"
+              value={weight ? Number(weight) : 60}
+              min={30}
+              max={200}
+              onChange={(v) => setWeight(String(v))}
+            />
+          </View>
+          <View className="flex-1 ml-2">
+            <ScrollPicker
+              label="Height"
+              unit="cm"
+              value={height ? Number(height) : 165}
+              min={100}
+              max={220}
+              onChange={(v) => setHeight(String(v))}
+            />
           </View>
         </View>
+        <ScrollPicker
+          label="Age"
+          unit="years"
+          value={age ? Number(age) : 30}
+          min={1}
+          max={120}
+          onChange={(v) => setAge(String(v))}
+        />
+      </Card>
 
-        {/* Health Conditions */}
-        <View className="bg-card rounded-xl border border-border p-4 mb-5">
-          <SectionHeader icon={ShieldAlert} label="Health Conditions" />
-          <Text className="text-xs text-muted-foreground mb-3">
-            These affect your nutrient recommendations
+      <Banner
+        tone="info"
+        message="The sections below are saved when you tap Save profile at the bottom."
+      />
+
+      {/* CKD Stage */}
+      <Card className="mb-4">
+        <SectionTitle icon={Heart} title="CKD stage" className="mb-2" />
+        <View className="flex-row flex-wrap" accessibilityRole="radiogroup">
+          {CKD_STAGES.map(({ value, label }) => (
+            <Chip
+              key={value}
+              label={label}
+              selected={ckdStage === value}
+              onPress={() => setCkdStage(value)}
+              className="min-w-[64px]"
+            />
+          ))}
+        </View>
+        {ckdStage && CKD_STAGE_DESCRIPTIONS[ckdStage] ? (
+          <Text className="text-body text-muted-foreground">
+            Stage {ckdStage}: {CKD_STAGE_DESCRIPTIONS[ckdStage]}
           </Text>
-          <View className="flex-row flex-wrap">
-            <TogglePill label="Diabetes" active={hasDiabetes} onPress={() => setHasDiabetes(!hasDiabetes)} />
-            <TogglePill label="Hypertension" active={hasHypertension} onPress={() => setHasHypertension(!hasHypertension)} />
-          </View>
-        </View>
+        ) : null}
+        {latestEgfr && suggestedStage !== ckdStage ? (
+          <Pressable
+            onPress={() => setCkdStage(stageFromEgfr(Number(latestEgfr)))}
+            accessibilityRole="button"
+            className="mt-4 bg-primary-soft border border-primary/30 rounded-sm p-4 active:opacity-80"
+          >
+            <Text className="text-body text-foreground">
+              Based on your eGFR of {latestEgfr}, your stage may be{" "}
+              <Text className="font-bold">{suggestedStage}</Text>.
+            </Text>
+            <Text className="text-body font-bold text-primary mt-1">
+              Tap to use stage {suggestedStage}
+            </Text>
+          </Pressable>
+        ) : null}
+      </Card>
 
-        {/* Activity Level */}
-        <View className="bg-card rounded-xl border border-border p-4 mb-5">
-          <SectionHeader icon={Zap} label="Activity Level" />
-          <View className="flex-row flex-wrap">
-            {ACTIVITY_LEVELS.map(({ value, label }) => (
-              <TogglePill
-                key={value}
-                label={label}
-                active={activityLevel === value}
-                onPress={() => setActivityLevel(value)}
-              />
-            ))}
-          </View>
+      {/* Gender + Health Conditions */}
+      <Card className="mb-4">
+        <SectionTitle icon={Users} title="Gender" className="mb-2" />
+        <View className="flex-row flex-wrap mb-4" accessibilityRole="radiogroup">
+          {[
+            { v: "male", label: "Male" },
+            { v: "female", label: "Female" },
+          ].map(({ v, label }) => (
+            <Chip key={v} label={label} selected={gender === v} onPress={() => setGender(v)} />
+          ))}
         </View>
-
-        {/* Dietary Preference */}
-        <View className="bg-card rounded-xl border border-border p-4 mb-5">
-          <SectionHeader icon={Leaf} label="Dietary Preference" />
-          <View className="flex-row flex-wrap">
-            {DIETARY_PREFERENCES.map(({ value, label }) => (
-              <TogglePill
-                key={value}
-                label={label}
-                active={dietaryPreference === value}
-                onPress={() => setDietaryPreference(value)}
-              />
-            ))}
-          </View>
-          <Text className="text-xs font-medium text-muted-foreground mt-3 mb-1">
-            Food allergies or intolerances
-          </Text>
-          <TextInput
-            value={foodAllergies}
-            onChangeText={setFoodAllergies}
-            placeholder="e.g. peanuts, shellfish, dairy"
-            placeholderTextColor="#9CA3AF"
-            className="px-3 py-2.5 rounded-lg bg-muted border border-border text-sm text-foreground"
+        <SectionTitle icon={ShieldAlert} title="Other conditions" className="mb-2" />
+        <Text className="text-caption text-muted-foreground mb-2">
+          These affect your nutrient recommendations
+        </Text>
+        <View className="flex-row flex-wrap">
+          <Chip
+            role="checkbox"
+            label="Diabetes"
+            selected={hasDiabetes}
+            onPress={() => setHasDiabetes(!hasDiabetes)}
+          />
+          <Chip
+            role="checkbox"
+            label="Hypertension"
+            selected={hasHypertension}
+            onPress={() => setHasHypertension(!hasHypertension)}
           />
         </View>
+      </Card>
 
-        {/* Clinical Info */}
-        <View className="bg-card rounded-xl border border-border p-4 mb-5">
-          <SectionHeader icon={Stethoscope} label="Clinical Info" />
-          <View className="flex-row flex-wrap -mx-1.5">
-            <View className="w-1/2 px-1.5 mb-3">
-              <Text className="text-xs font-medium text-muted-foreground mb-1">
-                Latest eGFR (mL/min)
-              </Text>
-              <TextInput
-                value={latestEgfr}
-                onChangeText={setLatestEgfr}
-                placeholder="e.g. 45"
-                placeholderTextColor="#9CA3AF"
-                keyboardType="numeric"
-                className="px-3 py-2.5 rounded-lg bg-muted border border-border text-sm text-foreground"
-              />
-            </View>
-            <View className="w-1/2 px-1.5 mb-3">
-              <View className="flex-row items-center mb-1">
-                <Calendar size={12} color="#6B7280" />
-                <Text className="text-xs font-medium text-muted-foreground ml-1">Diagnosis date</Text>
-              </View>
-              <TextInput
-                value={diagnosisDate}
-                onChangeText={setDiagnosisDate}
-                placeholder="YYYY-MM"
-                placeholderTextColor="#9CA3AF"
-                className="px-3 py-2.5 rounded-lg bg-muted border border-border text-sm text-foreground"
-              />
-            </View>
-          </View>
+      {/* Activity Level */}
+      <Card className="mb-4">
+        <SectionTitle icon={Zap} title="Activity level" className="mb-2" />
+        <View className="flex-row flex-wrap" accessibilityRole="radiogroup">
+          {ACTIVITY_LEVELS.map(({ value, label }) => (
+            <Chip
+              key={value}
+              label={label}
+              selected={activityLevel === value}
+              onPress={() => setActivityLevel(value)}
+            />
+          ))}
         </View>
+      </Card>
 
-        <Button onPress={handleSave} loading={saving} className="mb-4">
-          Save Profile
-        </Button>
+      {/* Dietary Preference */}
+      <Card className="mb-4">
+        <SectionTitle icon={Leaf} title="Dietary preference" className="mb-2" />
+        <View className="flex-row flex-wrap mb-2" accessibilityRole="radiogroup">
+          {DIETARY_PREFERENCES.map(({ value, label }) => (
+            <Chip
+              key={value}
+              label={label}
+              selected={dietaryPreference === value}
+              onPress={() => setDietaryPreference(value)}
+            />
+          ))}
+        </View>
+        <TextField
+          label="Food allergies or intolerances"
+          value={foodAllergies}
+          onChangeText={setFoodAllergies}
+          placeholder="e.g. peanuts, shellfish, dairy"
+          containerClassName="mb-0"
+        />
+      </Card>
 
-        <Button variant="destructive-outline" onPress={handleLogout}>
-          <View className="flex-row items-center">
-            <LogOut size={16} color="#DC2D27" />
-            <Text className="text-destructive font-semibold ml-2">Sign Out</Text>
-          </View>
-        </Button>
-      </ScrollView>
-    </SafeAreaView>
+      {/* Clinical Info */}
+      <Card className="mb-6">
+        <SectionTitle icon={Stethoscope} title="Clinical info" />
+        <TextField
+          label="Latest eGFR (mL/min)"
+          value={latestEgfr}
+          onChangeText={setLatestEgfr}
+          placeholder="e.g. 45"
+          keyboardType="numeric"
+        />
+        <TextField
+          label="Diagnosis date"
+          icon={Calendar}
+          value={diagnosisDate}
+          onChangeText={setDiagnosisDate}
+          placeholder="YYYY-MM"
+          hint="Year and month, e.g. 2021-06"
+          containerClassName="mb-0"
+        />
+      </Card>
+
+      <Button onPress={handleSave} loading={saving} icon={Save} className="mb-4">
+        Save profile
+      </Button>
+
+      <Button variant="destructive-outline" icon={LogOut} onPress={handleLogout}>
+        Sign out
+      </Button>
+    </Screen>
   );
 }

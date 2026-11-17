@@ -141,8 +141,8 @@ app/                          # Expo Router screens (file-based routing)
     index.tsx                 # Dashboard — calorie gauge, nutrient progress bars, today's meals
     scan.tsx                  # Meal logging — Scan (camera + YOLO) and Manual (search) modes
     history.tsx               # Meal history grouped by date, daily totals, expandable cards, pull-to-refresh
-    lab-reports.tsx            # Lab report upload (Phase 3 placeholder)
-    chat.tsx                  # CKD AI assistant (placeholder, disabled)
+    lab-reports.tsx            # Lab report OCR flow (pick → scan → review → save) — MOCK backend
+    chat.tsx                  # CKD diet assistant chat — MOCK backend
     profile.tsx               # User profile, CKD stage, health flags, weight chart
 
 lib/                          # Shared utilities (imported via @/lib/*)
@@ -192,7 +192,7 @@ Config files:
   app.json                    # Expo config — plugins: camera, image-picker, fast-tflite, router
   eas.json                    # EAS Build profiles (development, preview, production)
   metro.config.js             # Block backend/venv from bundler, add .tflite to assetExts
-  tailwind.config.js          # Theme tokens (primary #1A7A55, CKD-specific colors)
+  tailwind.config.js          # Builds classes + light/dark CSS variables from theme/tokens.js
   babel.config.js             # NativeWind JSX transform
   tsconfig.json               # Strict mode, @/* path alias, typed routes
   global.css                  # Tailwind directives (@tailwind base/components/utilities)
@@ -316,7 +316,12 @@ Tab navigator has 5 visible tabs (Home, History, Log Meal, Chat, Profile) + 1 hi
 
 ### Styling
 
-NativeWind 4 with `jsxImportSource: "nativewind"` (set in `babel.config.js`). `global.css` imported at top of `app/_layout.tsx`. Custom theme tokens (primary `#1A7A55`, semantic foreground/card/destructive/etc.) live in `tailwind.config.js` — use `className="bg-primary"` not hardcoded hex.
+NativeWind 4 with `jsxImportSource: "nativewind"` (set in `babel.config.js`). `global.css` imported at top of `app/_layout.tsx`.
+
+- **Tokens**: `theme/tokens.js` is the single source of truth (light + dark palettes, 4-size type scale, radii, 48pt touch size). Designed for elderly users — every text pair is WCAG AA+ and nothing is below 15px.
+- `tailwind.config.js` turns palettes into CSS variables (`:root` / `.dark:root`, `darkMode: "class"`), so semantic classes (`bg-card`, `text-foreground`, `bg-danger-soft`, `text-body`, `rounded-md`) switch theme automatically — never write `dark:` variants or hex in screens. `fontSize`/`fontWeight` are replaced, not extended: only `text-caption|body|title|display` and `font-normal|bold` exist.
+- Where className can't reach (icon `color`, SVG, navigation options) use `const { colors } = useTheme()` from `lib/theme.tsx`. It also exposes `preference`/`setPreference` (System/Light/Dark toggle in Profile, persisted in AsyncStorage), `shadow`, and `reduceMotion`.
+- Shared UI: `Screen`, `ScreenHeader`, `Card`, `Button`, `TextField`, `Chip`, `SegmentedControl`, `StatusBadge` (safe/caution/danger = icon + word + colour), `Banner`, `EmptyState`/`ErrorState`/`LoadingState`, `useToast()`.
 
 ### On-device food detection (scan flow)
 
@@ -428,6 +433,6 @@ All health/lifestyle data stored as `user_metadata` on the Supabase auth user.
 ## Not yet implemented
 
 - **Offline logging**: Queue meals locally when offline, sync to Supabase on reconnect. Needs `@react-native-community/netinfo` + AsyncStorage queue.
-- **Chat**: CKD AI assistant (RAG-powered) — UI placeholder exists, functionality disabled.
-- **Lab report OCR**: `ocr/extract` endpoint is a stub. Phase 3.
+- **Chat**: CKD AI assistant (RAG-powered) — full UI works against `mocks/chat.ts` (`sendChatMessage`); swap for the real service.
+- **Lab report OCR**: `ocr/extract` endpoint is a stub. Phase 3. Full UI works against `mocks/labReports.ts` (`recognizeText`, `saveLabReport`, `fetchLabReports`). Set `MOCK_FAILURE_RATE` in `mocks/config.ts` to test error states.
 - **Auth hardening**: CORS is wide open (`allow_origins=["*"]`). Must restrict before deploy.

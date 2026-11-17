@@ -164,9 +164,11 @@ NutriKidney uses YOLO26-Nano (Ultralytics, Jan 2026) for on-device food detectio
 7. All 7 nutrients scale linearly with estimated portion
 8. User reviews and adjusts on confirmation screen
 
-### Supported food classes (15)
+### Supported food classes (17)
 
-Anchovies, Boiled Egg, Char Kuey Teow, Chicken Rendang, Cucumber, Curry Puff, Fried Banana, Fried Chicken, Fried Egg, Fried Rice, Hokkien Mee, Mee Rebus, Peanuts, Rice, Sambal
+Anchovies, Boiled Egg, Char Kuey Teow, Chicken Rendang, Curry Puff, Fried Chicken, Fried Egg, Fried Rice, Hokkien Mee, Lo Mein, Mee Rebus, Mee Siam, Peanuts, Rice, Roti Canai, Sambal, Slices Cucumber
+
+> Class order in `lib/yolo.ts → CLASS_NAMES` must match the model's export order — verify against the exported `labels.txt` after every retrain.
 
 ### Retraining the model
 
@@ -209,10 +211,20 @@ backend/                      # FastAPI service
   main.py                     # App entry + CORS
   routers/
     auth.py                   # JWT validation (Supabase JWKS)
+    chat.py                   # RAG chat endpoint (POST /chat)
     food.py                   # Food lookup + NL parsing
     logs.py                   # Meal CRUD
     scan.py                   # Roboflow API fallback
     ocr.py                    # OCR placeholder
+  rag/                        # RAG pipeline for the chatbot
+    ingest.py                 # CLI: parse → chunk → embed → store
+    chunking.py               # heading-aware chunking (pdf/md/txt)
+    embed.py                  # local embeddings (fastembed, free)
+    store.py                  # Supabase pgvector storage + search
+    llm.py                    # free-tier LLM providers (Gemini/Groq/OpenRouter)
+    prompts.py                # system prompt + context assembly
+    schema.sql                # run once in Supabase SQL editor
+  knowledge/                  # ← drop your CKD PDFs/MD here (see README.md)
   data/
     food_db.json              # Malaysian food database
 
@@ -271,3 +283,56 @@ This project is for educational and research purposes.
 - [KDOQI Guidelines](https://www.kidney.org/professionals/kdoqi-guidelines) — CKD nutrient limits
 - [Supabase](https://supabase.com/) — auth and database
 - [Expo](https://expo.dev/) — React Native framework and build service
+
+## Contributing
+
+We welcome contributions! Please read this section before submitting a PR.
+
+### Getting Started
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/your-feature-name`
+3. Make your changes
+4. Run tests/lint if available
+5. Submit a PR with a clear description
+
+### Development Workflow
+
+- **Mobile changes**: Edit files in `app/`, `lib/`, `components/`. Test with `npx expo start -c`.
+- **Backend changes**: Edit files in `backend/`. Test with `uvicorn main:app --reload --port 8000`.
+- **Native changes**: Require `npx expo prebuild` and rebuild via EAS.
+
+### Code Style
+
+- TypeScript strict mode enabled
+- NativeWind/Tailwind for styling (semantic tokens only, no raw hex)
+- ESLint not configured — follow existing patterns
+- No formatter configured — match surrounding code style
+
+### Commit Messages
+
+Use conventional commits:
+- `feat: add food search by barcode`
+- `fix: correct potassium calculation for scaled portions`
+- `docs: update README with OCR setup steps`
+- `refactor: extract portion estimator to lib/`
+
+### What to Work On
+
+See [PLAN.md](PLAN.md) for the current sprint roadmap. Good first issues:
+- Improve portion estimation accuracy
+- Add more Malaysian foods to `backend/data/food_db.json`
+- Implement offline meal queue + sync
+- Add unit tests for `lib/foodDb.ts` and `lib/ckdLimits.ts`
+
+### Reporting Issues
+
+Use GitHub Issues. Include:
+- Device/OS version
+- Steps to reproduce
+- Expected vs actual behavior
+- Screenshots if UI-related
+
+### Security
+
+Report security vulnerabilities privately via GitHub Security Advisories, not public issues.

@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { Link } from "expo-router";
-import { LogIn, Mail, Lock } from "lucide-react-native";
+import { LogIn, Mail, Lock, UserPlus } from "lucide-react-native";
 import AuthLayout from "@/components/AuthLayout";
 import Button from "@/components/Button";
 import TextField from "@/components/TextField";
 import GoogleIcon from "@/components/GoogleIcon";
+import Banner from "@/components/Banner";
 import { useAuth } from "@/lib/AuthContext";
 
 export default function Login() {
@@ -40,36 +41,21 @@ export default function Login() {
     <AuthLayout
       icon={LogIn}
       title="Welcome back"
-      subtitle="Log in to your account"
+      subtitle="Log in to track your kidney-friendly meals"
       footer={
-        <Text className="text-sm text-muted-foreground">
-          Don't have an account?{" "}
-          <Link href="/(auth)/register" className="text-primary font-medium">
-            Create one
+        <View className="w-full items-center">
+          <Text className="text-body text-muted-foreground mb-2">
+            New to NutriKidney?
+          </Text>
+          <Link href="/(auth)/register" asChild>
+            <Button variant="outline" icon={UserPlus} className="self-stretch">
+              Create an account
+            </Button>
           </Link>
-        </Text>
+        </View>
       }
     >
-      <Button variant="outline" className="mb-6" onPress={handleGoogle}>
-        <View className="flex-row items-center">
-          <GoogleIcon size={20} />
-          <Text className="text-sm font-medium text-foreground ml-2">
-            Continue with Google
-          </Text>
-        </View>
-      </Button>
-
-      <View className="flex-row items-center mb-6">
-        <View className="flex-1 h-px bg-border" />
-        <Text className="mx-3 text-xs uppercase text-muted-foreground">or</Text>
-        <View className="flex-1 h-px bg-border" />
-      </View>
-
-      {error ? (
-        <View className="mb-4 p-3 rounded-lg bg-destructive/10">
-          <Text className="text-destructive text-sm">{error}</Text>
-        </View>
-      ) : null}
+      {error ? <Banner tone="danger" message={error} /> : null}
 
       <TextField
         label="Email"
@@ -87,19 +73,35 @@ export default function Login() {
         icon={Lock}
         value={password}
         onChangeText={setPassword}
-        placeholder="••••••••"
+        placeholder="Your password"
         secureTextEntry
         autoComplete="password"
-        rightSlot={
-          <Link href="/(auth)/forgot-password" asChild>
-            <Pressable>
-              <Text className="text-xs text-primary">Forgot password?</Text>
-            </Pressable>
-          </Link>
-        }
+        containerClassName="mb-2"
       />
-      <Button onPress={handleSubmit} loading={loading} className="mt-2">
+      <Link href="/(auth)/forgot-password" asChild>
+        <Pressable
+          accessibilityRole="link"
+          className="min-h-touch justify-center self-end mb-4"
+        >
+          <Text className="text-body font-bold text-primary">Forgot password?</Text>
+        </Pressable>
+      </Link>
+
+      <Button onPress={handleSubmit} loading={loading}>
         Log in
+      </Button>
+
+      <View className="flex-row items-center my-6">
+        <View className="flex-1 h-px bg-border" />
+        <Text className="mx-4 text-caption text-muted-foreground">or</Text>
+        <View className="flex-1 h-px bg-border" />
+      </View>
+
+      <Button variant="outline" onPress={handleGoogle}>
+        <GoogleIcon size={20} />
+        <Text className="text-body font-bold text-foreground ml-2">
+          Continue with Google
+        </Text>
       </Button>
     </AuthLayout>
   );

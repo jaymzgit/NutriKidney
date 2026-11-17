@@ -1,5 +1,6 @@
 import { Text, View } from "react-native";
-import { AlertTriangle } from "lucide-react-native";
+import { AlertOctagon, Lightbulb } from "lucide-react-native";
+import { useTheme } from "@/lib/theme";
 
 export type NutrientAlertData = {
   key: "potassium" | "phosphorus" | "sodium" | "protein";
@@ -23,31 +24,50 @@ const swapSuggestions: Record<string, string> = {
 };
 
 export default function NutrientAlert({ alert }: { alert: NutrientAlertData }) {
+  const { colors, shadow } = useTheme();
   const excess = Math.round(alert.total - alert.limit);
   const suggestion = swapSuggestions[alert.key];
 
   return (
-    <View className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-2">
-      <View className="flex-row items-start">
-        <View className="h-8 w-8 bg-red-100 rounded-xl items-center justify-center">
-          <AlertTriangle size={16} color="#DC2626" />
-        </View>
-        <View className="flex-1 ml-3">
-          <Text className="text-sm font-bold text-red-700">
-            {alert.label} limit exceeded
+    <View
+      className="bg-card border border-danger/40 rounded-md mb-4 overflow-hidden"
+      style={shadow}
+    >
+      <View className="bg-danger-soft px-5 py-4 flex-row items-center">
+        <AlertOctagon size={24} color={colors.danger} strokeWidth={2.25} />
+        <Text
+          className="flex-1 ml-3 text-title font-bold text-danger"
+          accessibilityRole="header"
+        >
+          {alert.label} too high
+        </Text>
+      </View>
+
+      <View className="p-5">
+        <Text className="text-caption text-muted-foreground">Over your daily limit by</Text>
+        <Text className="text-display font-bold text-foreground">
+          {excess}
+          <Text className="text-body font-normal text-muted-foreground"> {alert.unit}</Text>
+        </Text>
+        <Text className="text-body text-muted-foreground mt-1">
+          {Math.round(alert.total)} of {alert.limit} {alert.unit} eaten today
+        </Text>
+
+        {alert.topItem ? (
+          <Text className="text-body text-foreground mt-4">
+            Biggest source today:{" "}
+            <Text className="font-bold">{alert.topItem}</Text>
           </Text>
-          <Text className="text-xs text-red-600 mt-0.5">
-            +{excess} {alert.unit} over your daily limit
-            {alert.topItem ? (
-              <Text>
-                {" — highest source: "}
-                <Text className="font-semibold">{alert.topItem}</Text>
-              </Text>
-            ) : null}
-          </Text>
-          <Text className="text-xs text-red-500 mt-2 leading-relaxed">
-            💡 {suggestion}
-          </Text>
+        ) : null}
+
+        <View className="flex-row bg-muted rounded-sm p-4 mt-4">
+          <Lightbulb size={20} color={colors.caution} strokeWidth={2.25} />
+          <View className="flex-1 ml-3">
+            <Text className="text-caption font-bold text-foreground mb-1">
+              Try this instead
+            </Text>
+            <Text className="text-body text-foreground">{suggestion}</Text>
+          </View>
         </View>
       </View>
     </View>

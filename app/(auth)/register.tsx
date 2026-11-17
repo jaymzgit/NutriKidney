@@ -2,30 +2,37 @@ import { useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Link } from "expo-router";
 import {
+  ArrowRight,
   ChevronLeft,
   Heart,
   Leaf,
   Lock,
+  LogIn,
   Mail,
+  PartyPopper,
   ShieldAlert,
   User,
-  UserPlus,
+  Users,
   Zap,
 } from "lucide-react-native";
 import Button from "@/components/Button";
 import TextField from "@/components/TextField";
 import ScrollPicker from "@/components/ScrollPicker";
 import GoogleIcon from "@/components/GoogleIcon";
+import Banner from "@/components/Banner";
+import Card from "@/components/Card";
+import Chip from "@/components/Chip";
+import IconButton from "@/components/IconButton";
+import SectionTitle from "@/components/SectionTitle";
 import { useAuth } from "@/lib/AuthContext";
+import { useTheme } from "@/lib/theme";
 
 const STEPS = [
   { title: "Create your account", subtitle: "Sign up to get started" },
@@ -44,11 +51,11 @@ const CKD_STAGES = [
 ];
 
 const CKD_STAGE_DESCRIPTIONS: Record<string, string> = {
-  "1": "Normal GFR (\u226590)",
-  "2": "Mild decrease (60\u201389)",
-  "3a": "Mild-moderate (45\u201359)",
-  "3b": "Moderate-severe (30\u201344)",
-  "4": "Severe decrease (15\u201329)",
+  "1": "Normal GFR (≥90)",
+  "2": "Mild decrease (60–89)",
+  "3a": "Mild-moderate (45–59)",
+  "3b": "Moderate-severe (30–44)",
+  "4": "Severe decrease (15–29)",
   "5": "Kidney failure (<15)",
 };
 
@@ -67,44 +74,9 @@ const DIETARY_PREFERENCES = [
   { value: "pescatarian", label: "Pescatarian" },
 ];
 
-function TogglePill({
-  label,
-  active,
-  onPress,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      className={`px-4 py-2.5 rounded-lg border mr-2 mb-2 ${
-        active ? "border-primary bg-primary/5" : "border-border bg-muted"
-      }`}
-    >
-      <Text
-        className={`text-sm ${
-          active ? "text-primary font-semibold" : "text-foreground"
-        }`}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function SectionLabel({ icon: Icon, label }: { icon: any; label: string }) {
-  return (
-    <View className="flex-row items-center mb-3">
-      <Icon size={16} color="#1A7A55" />
-      <Text className="text-sm font-bold text-foreground ml-2">{label}</Text>
-    </View>
-  );
-}
-
 export default function Register() {
   const { signUpWithEmail, signInWithGoogle } = useAuth();
+  const { colors } = useTheme();
   const [step, setStep] = useState(0);
 
   // Step 0: Account
@@ -189,96 +161,104 @@ export default function Register() {
 
   const { title, subtitle } = STEPS[step];
 
+  // ─── Success (peak moment) ───
+  if (info) {
+    return (
+      <SafeAreaView className="flex-1 bg-background">
+        <View className="flex-1 justify-center px-4 w-full max-w-md self-center">
+          <Card padded={false} className="p-6 items-center">
+            <View className="h-24 w-24 rounded-full bg-primary-soft items-center justify-center mb-6">
+              <PartyPopper size={44} color={colors.primary} />
+            </View>
+            <Text
+              className="text-display font-bold text-foreground text-center"
+              accessibilityRole="header"
+            >
+              You're all set{fullName.trim() ? `, ${fullName.trim().split(" ")[0]}` : ""}!
+            </Text>
+            <Text
+              className="text-body text-muted-foreground text-center mt-4"
+              accessibilityLiveRegion="polite"
+            >
+              {info}
+            </Text>
+            <Link href="/(auth)/login" asChild>
+              <Button icon={LogIn} className="self-stretch mt-8">
+                Go to log in
+              </Button>
+            </Link>
+          </Card>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView className="flex-1 bg-background">
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         className="flex-1"
       >
-        {step > 0 && (
-          <Pressable
-            onPress={() => setStep(step - 1)}
-            className="flex-row items-center px-4 pt-2 pb-1"
+        {/* Progress header */}
+        <View className="px-4 pt-2 w-full max-w-md self-center">
+          <View className="flex-row items-center min-h-touch">
+            {step > 0 ? (
+              <IconButton
+                icon={ChevronLeft}
+                accessibilityLabel="Previous step"
+                onPress={() => setStep(step - 1)}
+                className="-ml-2 mr-2"
+              />
+            ) : null}
+            <Text className="text-caption font-bold text-muted-foreground">
+              Step {step + 1} of {STEPS.length}
+            </Text>
+          </View>
+          <View
+            className="flex-row mt-2"
+            accessible
+            accessibilityRole="progressbar"
+            accessibilityValue={{ min: 1, max: STEPS.length, now: step + 1 }}
           >
-            <ChevronLeft size={20} color="#1A7A55" />
-            <Text className="text-primary text-sm font-medium ml-1">Back</Text>
-          </Pressable>
-        )}
+            {STEPS.map((_, i) => (
+              <View
+                key={i}
+                className={`flex-1 h-2 rounded-full ${i <= step ? "bg-primary" : "bg-border"} ${
+                  i < STEPS.length - 1 ? "mr-2" : ""
+                }`}
+              />
+            ))}
+          </View>
+        </View>
 
         <ScrollView
-          contentContainerStyle={{ flexGrow: 1 }}
+          contentContainerStyle={{ flexGrow: 1, paddingBottom: 32 }}
           keyboardShouldPersistTaps="handled"
           className="px-4"
         >
           <View className="w-full max-w-md self-center flex-1">
-            {/* Step indicator */}
-            <View className="flex-row items-center justify-center mt-4 mb-6">
-              {STEPS.map((_, i) => (
-                <View key={i} className="flex-row items-center">
-                  <View
-                    className={`h-2 rounded-full ${
-                      i <= step ? "bg-primary" : "bg-border"
-                    } ${i === step ? "w-6" : "w-2"}`}
-                  />
-                  {i < STEPS.length - 1 && <View className="w-2" />}
-                </View>
-              ))}
-            </View>
-
-            {/* Title */}
-            <View className="items-center mb-6">
-              <View className="w-12 h-12 rounded-2xl bg-primary items-center justify-center mb-3">
-                <UserPlus size={24} color="#FFFFFF" />
-              </View>
-              <Text className="text-2xl font-bold text-foreground text-center">
+            <View className="mt-6 mb-6">
+              <Text
+                className="text-display font-bold text-foreground"
+                accessibilityRole="header"
+              >
                 {title}
               </Text>
-              <Text className="text-muted-foreground mt-1 text-center">
-                {subtitle}
-              </Text>
+              <Text className="text-body text-muted-foreground mt-2">{subtitle}</Text>
             </View>
 
-            {error ? (
-              <View className="mb-4 p-3 rounded-lg bg-destructive/10">
-                <Text className="text-destructive text-sm">{error}</Text>
-              </View>
-            ) : null}
-            {info ? (
-              <View className="mb-4 p-3 rounded-lg bg-primary/10">
-                <Text className="text-primary text-sm">{info}</Text>
-              </View>
-            ) : null}
+            {error ? <Banner tone="danger" message={error} /> : null}
 
-            {/* Step content */}
-            <View className="bg-card rounded-2xl border border-border p-5">
+            <Card padded={false} className="p-5">
               {/* ─── Step 0: Account ─── */}
               {step === 0 && (
                 <>
-                  <Button
-                    variant="outline"
-                    className="mb-5"
-                    onPress={handleGoogle}
-                  >
-                    <View className="flex-row items-center">
-                      <GoogleIcon size={20} />
-                      <Text className="text-sm font-medium text-foreground ml-2">
-                        Continue with Google
-                      </Text>
-                    </View>
-                  </Button>
-                  <View className="flex-row items-center mb-5">
-                    <View className="flex-1 h-px bg-border" />
-                    <Text className="mx-3 text-xs uppercase text-muted-foreground">
-                      or
-                    </Text>
-                    <View className="flex-1 h-px bg-border" />
-                  </View>
                   <TextField
-                    label="Full Name"
+                    label="Full name"
                     icon={User}
                     value={fullName}
                     onChangeText={setFullName}
-                    placeholder="John Doe"
+                    placeholder="e.g. Tan Ah Kow"
                     autoCapitalize="words"
                     autoComplete="name"
                   />
@@ -298,27 +278,39 @@ export default function Register() {
                     icon={Lock}
                     value={password}
                     onChangeText={setPassword}
-                    placeholder="••••••••"
+                    placeholder="Choose a password"
                     secureTextEntry
                     autoComplete="password-new"
                   />
                   <TextField
-                    label="Confirm Password"
+                    label="Confirm password"
                     icon={Lock}
                     value={confirmPassword}
                     onChangeText={setConfirmPassword}
-                    placeholder="••••••••"
+                    placeholder="Type it again"
                     secureTextEntry
                     autoComplete="password-new"
+                    containerClassName="mb-0"
                   />
+                  <View className="flex-row items-center my-6">
+                    <View className="flex-1 h-px bg-border" />
+                    <Text className="mx-4 text-caption text-muted-foreground">or</Text>
+                    <View className="flex-1 h-px bg-border" />
+                  </View>
+                  <Button variant="outline" onPress={handleGoogle}>
+                    <GoogleIcon size={20} />
+                    <Text className="text-body font-bold text-foreground ml-2">
+                      Continue with Google
+                    </Text>
+                  </Button>
                 </>
               )}
 
               {/* ─── Step 1: About You ─── */}
               {step === 1 && (
                 <View>
-                  <View className="flex-row gap-3 mb-3">
-                    <View className="flex-1">
+                  <View className="flex-row mb-4">
+                    <View className="flex-1 mr-2">
                       <ScrollPicker
                         label="Weight"
                         unit="kg"
@@ -328,7 +320,7 @@ export default function Register() {
                         onChange={(v) => setWeight(String(v))}
                       />
                     </View>
-                    <View className="flex-1">
+                    <View className="flex-1 ml-2">
                       <ScrollPicker
                         label="Height"
                         unit="cm"
@@ -339,50 +331,27 @@ export default function Register() {
                       />
                     </View>
                   </View>
-                  <View className="flex-row gap-3">
-                    <View className="flex-1">
-                      <ScrollPicker
-                        label="Age"
-                        unit="yrs"
-                        value={age ? Number(age) : 30}
-                        min={1}
-                        max={120}
-                        onChange={(v) => setAge(String(v))}
+                  <ScrollPicker
+                    label="Age"
+                    unit="years"
+                    value={age ? Number(age) : 30}
+                    min={1}
+                    max={120}
+                    onChange={(v) => setAge(String(v))}
+                  />
+                  <SectionTitle icon={Users} title="Gender" className="mt-6 mb-2" />
+                  <View className="flex-row flex-wrap" accessibilityRole="radiogroup">
+                    {[
+                      { v: "male", label: "Male" },
+                      { v: "female", label: "Female" },
+                    ].map(({ v, label }) => (
+                      <Chip
+                        key={v}
+                        label={label}
+                        selected={gender === v}
+                        onPress={() => setGender(v)}
                       />
-                    </View>
-                    <View className="flex-1 rounded-2xl border border-border bg-muted/50 overflow-hidden">
-                      <View className="px-4 pt-3 pb-1">
-                        <Text className="text-xs font-medium text-muted-foreground">
-                          Gender
-                        </Text>
-                      </View>
-                      <View className="flex-1 justify-center px-3 pb-3 gap-3">
-                        {[
-                          { v: "male", label: "Male" },
-                          { v: "female", label: "Female" },
-                        ].map(({ v, label }) => (
-                          <Pressable
-                            key={v}
-                            onPress={() => setGender(v)}
-                            className={`flex-1 rounded-lg border flex-row items-center justify-center ${
-                              gender === v
-                                ? "border-primary bg-primary/5"
-                                : "border-border bg-card"
-                            }`}
-                          >
-                            <Text
-                              className={`text-sm font-bold ${
-                                gender === v
-                                  ? "text-primary"
-                                  : "text-foreground"
-                              }`}
-                            >
-                              {label}
-                            </Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                    </View>
+                    ))}
                   </View>
                 </View>
               )}
@@ -390,58 +359,52 @@ export default function Register() {
               {/* ─── Step 2: Health ─── */}
               {step === 2 && (
                 <>
-                  <SectionLabel icon={Heart} label="CKD Stage" />
-                  <View className="flex-row flex-wrap -mx-1 mb-1">
+                  <SectionTitle icon={Heart} title="CKD stage" className="mb-2" />
+                  <View className="flex-row flex-wrap" accessibilityRole="radiogroup">
                     {CKD_STAGES.map(({ value, label }) => (
-                      <Pressable
+                      <Chip
                         key={value}
+                        label={label}
+                        selected={ckdStage === value}
                         onPress={() => setCkdStage(value)}
-                        className={`px-3.5 py-2 rounded-lg border mx-1 mb-2 ${
-                          ckdStage === value
-                            ? "border-primary bg-primary"
-                            : "border-border bg-muted"
-                        }`}
-                      >
-                        <Text
-                          className={`text-sm font-semibold ${
-                            ckdStage === value ? "text-white" : "text-foreground"
-                          }`}
-                        >
-                          {label}
-                        </Text>
-                      </Pressable>
+                        className="min-w-[64px]"
+                      />
                     ))}
                   </View>
                   {ckdStage && CKD_STAGE_DESCRIPTIONS[ckdStage] ? (
-                    <Text className="text-xs text-muted-foreground mb-3">
-                      {CKD_STAGE_DESCRIPTIONS[ckdStage]}
+                    <Text className="text-body text-muted-foreground mb-2">
+                      Stage {ckdStage}: {CKD_STAGE_DESCRIPTIONS[ckdStage]}
                     </Text>
-                  ) : null}
+                  ) : (
+                    <Text className="text-caption text-muted-foreground mb-2">
+                      Not sure? Ask your doctor, or skip for now.
+                    </Text>
+                  )}
 
-                  <SectionLabel icon={ShieldAlert} label="Health Conditions" />
-                  <View className="flex-row flex-wrap mb-2">
-                    <TogglePill
+                  <SectionTitle icon={ShieldAlert} title="Other conditions" className="mt-6 mb-2" />
+                  <View className="flex-row flex-wrap mb-4">
+                    <Chip
+                      role="checkbox"
                       label="Diabetes"
-                      active={hasDiabetes}
+                      selected={hasDiabetes}
                       onPress={() => setHasDiabetes(!hasDiabetes)}
                     />
-                    <TogglePill
+                    <Chip
+                      role="checkbox"
                       label="Hypertension"
-                      active={hasHypertension}
+                      selected={hasHypertension}
                       onPress={() => setHasHypertension(!hasHypertension)}
                     />
                   </View>
 
-                  <Text className="text-xs font-medium text-muted-foreground mt-2 mb-1">
-                    Latest eGFR (mL/min) — optional
-                  </Text>
-                  <TextInput
+                  <TextField
+                    label="Latest eGFR (mL/min) — optional"
                     value={latestEgfr}
                     onChangeText={setLatestEgfr}
                     placeholder="e.g. 45"
-                    placeholderTextColor="#9CA3AF"
                     keyboardType="numeric"
-                    className="px-3 py-2.5 rounded-lg bg-muted border border-border text-sm text-foreground"
+                    hint="You'll find this on your blood test report"
+                    containerClassName="mb-0"
                   />
                 </>
               )}
@@ -449,86 +412,80 @@ export default function Register() {
               {/* ─── Step 3: Lifestyle ─── */}
               {step === 3 && (
                 <>
-                  <SectionLabel icon={Zap} label="Activity Level" />
-                  <View className="flex-row flex-wrap mb-4">
+                  <SectionTitle icon={Zap} title="How active are you?" className="mb-2" />
+                  <View className="flex-row flex-wrap mb-4" accessibilityRole="radiogroup">
                     {ACTIVITY_LEVELS.map(({ value, label }) => (
-                      <TogglePill
+                      <Chip
                         key={value}
                         label={label}
-                        active={activityLevel === value}
+                        selected={activityLevel === value}
                         onPress={() => setActivityLevel(value)}
                       />
                     ))}
                   </View>
 
-                  <SectionLabel icon={Leaf} label="Dietary Preference" />
-                  <View className="flex-row flex-wrap mb-4">
+                  <SectionTitle icon={Leaf} title="Dietary preference" className="mb-2" />
+                  <View className="flex-row flex-wrap mb-4" accessibilityRole="radiogroup">
                     {DIETARY_PREFERENCES.map(({ value, label }) => (
-                      <TogglePill
+                      <Chip
                         key={value}
                         label={label}
-                        active={dietaryPreference === value}
+                        selected={dietaryPreference === value}
                         onPress={() => setDietaryPreference(value)}
                       />
                     ))}
                   </View>
 
-                  <Text className="text-xs font-medium text-muted-foreground mb-1">
-                    Food allergies or intolerances
-                  </Text>
-                  <TextInput
+                  <TextField
+                    label="Food allergies or intolerances"
                     value={foodAllergies}
                     onChangeText={setFoodAllergies}
                     placeholder="e.g. peanuts, shellfish, dairy"
-                    placeholderTextColor="#9CA3AF"
-                    className="px-3 py-2.5 rounded-lg bg-muted border border-border text-sm text-foreground"
+                    containerClassName="mb-0"
                   />
                 </>
               )}
-            </View>
+            </Card>
 
             {/* Navigation */}
-            {!info && (
-              <View className="mt-4">
-                {step < STEPS.length - 1 ? (
-                  <>
-                    <Button onPress={handleNext} disabled={!canAdvance()}>
+            <View className="mt-6">
+              {step < STEPS.length - 1 ? (
+                <>
+                  <Button onPress={handleNext} disabled={!canAdvance()}>
+                    <Text className="text-body font-bold text-primary-foreground mr-2">
                       Next
-                    </Button>
-                    {step > 0 && (
-                      <Pressable
-                        onPress={() =>
-                          step < STEPS.length - 1
-                            ? setStep(step + 1)
-                            : undefined
-                        }
-                        className="mt-2 items-center py-2"
-                      >
-                        <Text className="text-sm text-muted-foreground">
-                          Skip for now
-                        </Text>
-                      </Pressable>
-                    )}
-                  </>
-                ) : (
-                  <Button onPress={handleSubmit} loading={loading}>
-                    Create account
+                    </Text>
+                    <ArrowRight size={20} color={colors.primaryForeground} />
                   </Button>
-                )}
-              </View>
-            )}
+                  {step > 0 && (
+                    <Button
+                      variant="ghost"
+                      className="mt-2"
+                      onPress={() =>
+                        step < STEPS.length - 1
+                          ? setStep(step + 1)
+                          : undefined
+                      }
+                    >
+                      Skip for now
+                    </Button>
+                  )}
+                </>
+              ) : (
+                <Button onPress={handleSubmit} loading={loading}>
+                  Create account
+                </Button>
+              )}
+            </View>
 
             {/* Footer */}
-            <View className="items-center mt-6 mb-8">
-              <Text className="text-sm text-muted-foreground">
-                Already have an account?{" "}
-                <Link
-                  href="/(auth)/login"
-                  className="text-primary font-medium"
-                >
-                  Log in
-                </Link>
+            <View className="items-center mt-6">
+              <Text className="text-body text-muted-foreground">
+                Already have an account?
               </Text>
+              <Link href="/(auth)/login" asChild>
+                <Button variant="ghost">Log in</Button>
+              </Link>
             </View>
           </View>
         </ScrollView>
